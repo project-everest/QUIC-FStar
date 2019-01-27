@@ -1,5 +1,8 @@
 out.krml
+*.pdb
 *.o
+*.obj
+*.ilk
 *.c
 *.h
 !httpclient.c
@@ -8,8 +11,8 @@ out.krml
 !QUICFStar.h
 !mipki.h
 !mitlsffi.h
-!libmitls.dll
-!libquiccypto.dll
 !pingfstar.c
 *.exe
 *.lax
+Makefile.include
+Makefile.basic

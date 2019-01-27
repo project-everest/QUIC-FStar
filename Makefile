@@ -1,13 +1,14 @@
-KREMLIN_HOME	?= ../../../everest/kremlin
+KREMLIN_HOME	?= ../everest/kremlin
+MITLS_HOME      ?= ../everest/mitls-fstar
 KRML_BIN        = $(KREMLIN_HOME)/_build/src/Kremlin.native
 QUIC_OPTS       = -cc msvc -skip-compilation -I . -warn-error @4
 KRML            = $(KRML_BIN) $(KOPTS) $(TEST_OPTS)
-CCOPTS          = -g -I$(KREMLIN_HOME)/include/ -I$(KREMLIN_HOME)/kremlib/extracted/ -I. -Werror
-CCOPTS_KRML     = -g -I$(KREMLIN_HOME)/include/ -I$(KREMLIN_HOME)/kremlib/extracted/ -I. -DQUIC_KREMLIN=1 --include QUICFStar.h -Werror
+CCOPTS          = -g -I$(KREMLIN_HOME)/include/ -I$(KREMLIN_HOME)/kremlib/extracted/ -I$(MITLS_HOME)/libs/ffi -I$(MITLS_HOME)/src/pki -I. -Werror
+CCOPTS_KRML     = -g -I$(KREMLIN_HOME)/include/ -I$(KREMLIN_HOME)/kremlib/extracted/ -I$(MITLS_HOME)/libs/ffi -I$(MITLS_HOME)/src/pki -I. -DQUIC_KREMLIN=1 --include QUICFStar.h -Werror
 CC              ?= x86_64-w64-mingw32-gcc
 
 ifeq ($(OS),Windows_NT)
-MITLS_LIBS=libmitls.lib libquiccrypto.lib libmipki.lib
+MITLS_LIBS=$(MITLS_HOME)/src/windows/mitls/libmitls.lib $(MITLS_HOME)/src/windows/quiccrypto/libquiccrypto.lib $(MITLS_HOME)/src/pki/libmipki.lib
 LINK_LIBS=-lws2_32
 else
 MITLS_LIBS=libmitls.so libquiccrypto.so libmipki.so

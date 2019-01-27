@@ -1,10 +1,28 @@
 !IFNDEF KREMLIN_HOME
-KREMLIN_HOME = ../../../everest/kremlin
+KREMLIN_HOME = ../everest/kremlin
+!ENDIF
+!IFNDEF MITLS_HOME
+MITLS_HOME = ../everest/mitls-fstar
 !ENDIF
 
-CCOPTS = /nologo /Od /MD /Zi /DKRML_NOUINT128=1 -I $(KREMLIN_HOME)\include -I.
+CCOPTS = /nologo /Od /MD /Zi /DKRML_NOUINT128=1 -I $(KREMLIN_HOME)\include -I$(MITLS_HOME)\libs\ffi -I$(MITLS_HOME)\src\pki -I.
 CCOPTS_KRML = $(CCOPTS) -DQUIC_KREMLIN=1 -FIQUICFStar.h
-QUIC_OBJS = QUICTypes.obj QUICMutators.obj QUICUtils.obj QUICFFI.obj QUICConnection.obj QUICStream.obj QUICFrame.obj QUICLossAndCongestion.obj QUICEngine.obj QUICTLS.obj QUICFStar.obj C_Failure.obj libmitls.lib libquiccrypto.lib libmipki.lib libkremlib.lib
+QUIC_OBJS = QUICTypes.obj \
+            QUICMutators.obj \
+            QUICUtils.obj \
+            QUICFFI.obj \
+            QUICConnection.obj \
+            QUICStream.obj \
+            QUICFrame.obj \
+            QUICLossAndCongestion.obj \
+            QUICEngine.obj \
+            QUICTLS.obj \
+            QUICFStar.obj \
+            C_Failure.obj \
+            $(MITLS_HOME)\src\windows\mitls\libmitls.lib \
+            $(MITLS_HOME)\src\windows\quiccrypto\libquiccrypto.lib \
+            $(MITLS_HOME)\src\pki\libmipki.lib \
+            $(MITLS_HOME)\src\windows\kremlib\libkremlib.lib
 
 all: httpclientVS.exe pingfstarVS.exe httpserverVS.exe
 
