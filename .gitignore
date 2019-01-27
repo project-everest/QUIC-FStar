@@ -1,0 +1,15 @@
+out.krml
+*.o
+*.c
+*.h
+!httpclient.c
+!httpserver.c
+!QUICFStar.c
+!QUICFStar.h
+!mipki.h
+!mitlsffi.h
+!libmitls.dll
+!libquiccypto.dll
+!pingfstar.c
+*.exe
+*.lax
