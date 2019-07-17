@@ -17,6 +17,17 @@ endif
 
 all: httpclient.exe pingfstar.exe httpserver.exe
 
+FST_FILES=$(shell find . -name '*.fst')
+FSTI_FILES=$(shell find . -name '*.fsti')
+
+dep.graph: $(FST_FILES) $(FSTI_FILES)
+	fstar.exe --dep graph $^ 2>/dev/null 1>/dev/null
+
+%.png: %.graph
+	cat $< | grep -v fstar_ | grep -v lowstar_ | grep -v prims | tred | dot -Tpng -o$@
+
+depgraph: dep.png
+
 QUIC_OBJS = QUICTypes.o QUICMutators.o QUICUtils.o QUICFFI.o QUICConnection.o QUICStream.o QUICFrame.o QUICLossAndCongestion.o QUICEngine.o QUICTLS.o QUICFStar.o $(MITLS_LIBS) $(KREMLIN_HOME)/kremlib/dist/generic/libkremlib.a C_Failure.o
 
 QUICTypes.c QUICTypes.h QUICMutators.c QUICMutators.h QUICUtils.c QUICUtils.h QUICFFI.c QUICFFI.h QUICConnection.c QUICConnection.h QUICStream.c QUICStream.h QUICFrame.c QUICFrame.h QUICLossAndCongestion.c QUICLossAndCongestion.h QUICEngine.c QUICEngine.h QUICTLS.c QUICTLS.h FStar.h C_Failure.c C_Failure.h: QuicKremlin

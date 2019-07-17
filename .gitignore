@@ -16,3 +16,5 @@ out.krml
 *.lax
 Makefile.include
 Makefile.basic
+dep.graph
+dep.png
