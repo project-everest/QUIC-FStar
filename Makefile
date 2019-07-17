@@ -21,12 +21,23 @@ verify: DoublyLinkedList.fst-ver DoublyLinkedListIface.fst-ver DoublyLinkedListI
 
 -include .depend
 
+FSTAR_INCLUDE_ARGS = \
+	--include $(KREMLIN_HOME)/kremlib
+
+FSTAR_ADDITIONAL_ARGS ?=
+
+FSTAR_ARGS = $(FSTAR_INCLUDE_ARGS) $(FSTAR_ADDITIONAL_ARGS)
+FSTAR = fstar.exe $(FSTAR_ARGS)
+
 %-ver: %.checked
 	@true
 
+%-in:
+	@echo $(FSTAR_INCLUDE_ARGS)
+
 %.checked:
 	@echo "[Verifying] $<"
-	@fstar.exe --cache_checked_modules --record_hints --use_hints $< >/dev/null
+	@$(FSTAR) --cache_checked_modules --record_hints --use_hints $< >/dev/null
 	@echo "[Verified] $*"
 
 FST_FILES=$(shell find . -name '*.fst')
@@ -34,7 +45,7 @@ FSTI_FILES=$(shell find . -name '*.fsti')
 
 dep.graph: $(FST_FILES) $(FSTI_FILES)
 	@echo "[Generating dependencies]"
-	@fstar.exe --dep graph $^ 2>/dev/null 1>/dev/null
+	@$(FSTAR) --dep graph $^ 2>/dev/null 1>/dev/null
 	@echo "[Generated dependencies]"
 
 %.png: %.graph
@@ -46,7 +57,7 @@ depend: .depend
 	@true
 
 .depend: $(FST_FILES) $(FSTI_FILES)
-	fstar.exe --dep full $^ 2>/dev/null >.depend
+	$(FSTAR) --dep full $^ 2>/dev/null >.depend
 
 QUIC_OBJS = QUICTypes.o QUICMutators.o QUICUtils.o QUICFFI.o QUICConnection.o QUICStream.o QUICFrame.o QUICLossAndCongestion.o QUICEngine.o QUICTLS.o QUICFStar.o $(MITLS_LIBS) $(KREMLIN_HOME)/kremlib/dist/generic/libkremlib.a C_Failure.o
 
