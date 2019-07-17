@@ -284,7 +284,7 @@ let getvar_s (b:buffer_t) (length:U32.t) (offset:U32.t): ST (err (U64.t * U32.t)
      let cu8 = C.uint8_of_char c in
      let cf = FStar.Char.char_of_u32 (Cast.uint8_to_uint32 cu8) in
      let cs = FStar.String.string_of_char cf in
-     let newdst = FStar.String.strcat dst cs in
+     let newdst = dst ^ cs in
      cstring_to_string_internal src U32.(offset+^1ul) len newdst
    )
 
