@@ -21,119 +21,10 @@ module U8 = FStar.UInt8
 module I32 = FStar.Int32
 module B = LowStar.Buffer
 
+module DLL = DoublyLinkedListIface
+
 (** Type of a network buffer *)
 type buffer_t = B.buffer(UInt8.t)
-
-(** A doubly-linked list of a type*)
-type dlist (t:Type0) = {
-(* Forward link *)
-  flink: pointer_or_null (dlist t);
-(* Backward link *)
-  blink: pointer_or_null (dlist t);
-(* payload *)
-  p: t;
-}
-
-(** Head of a doubly linked list *)
-type dlisthead (t:Type) = {
-  (* head forward link *)
-  lhead: pointer_or_null (dlist t);
-  (* head backward link *)
-  ltail: pointer_or_null (dlist t);
-}
-
-(** Initialze an element of a doubly linked list *)
-let empty_entry (#t:Type) (payload:t): dlist(t) =
-  { flink = null; blink = null; p = payload; }
-  
-(** Initialize a doubly-linked list head *)
-let empty_list (#t:Type) : dlisthead t =
-  { lhead = null; ltail = null;}
-
-(** Insert an element e as the first element in a doubly linked list *)
-let insertHeadList (#t:Type) (h:dlisthead t) (e:pointer (dlist t)): ST (dlisthead t)
-   (requires (fun _ -> true))
-   (ensures (fun _ _ _ -> true))
-=
-  if is_null h.lhead then ( // the list is empty
-    e *= { !*e with flink=null; blink = null};
-    { lhead = e; ltail = e; }
-  ) else (
-    let next = h.lhead in
-    next *= { !*next with blink=e; };  // next->blink = e
-    e *= { !*e with flink=next; blink = null }; // e.flink=next/e.blink=null
-    { lhead = e; ltail = h.ltail }
-  )
-
-(** Insert an element e as the last element in a doubly linked list. *)
-let insertTailList (#t:Type) (h:dlisthead t) (e:pointer (dlist t)): ST (dlisthead t)
-   (requires (fun _ -> true))
-   (ensures (fun _ _ _ -> true))
-=
-  if is_null h.lhead then ( // the list is empty
-    e *= { !*e with flink=null; blink = null };
-    { lhead = e; ltail = e; }
-  ) else (
-    let prev = h.ltail in
-    prev *={ !*prev with flink=e; }; // tail->flink=e
-    e *= { !*e with flink=null; blink = prev }; // e->flink=null/e.blink=tail
-    { lhead = h.lhead; ltail = e; }
-  )
-
-(** Remove entry e from the doubly linked list *)
-let removeEntryList (#t:Type) (h:dlisthead t) (e:pointer (dlist t)): ST (dlisthead t)
-   (requires (fun _ -> true))
-   (ensures (fun _ _ _ -> true))
-=
-  if h.lhead = e then ( // removing from the head of the list
-    if h.ltail = e then (// and removing from the tail - the list will now be empty
-      { lhead = null; ltail = null; }
-    ) else (
-      let next = (!*e).flink in
-      next *= { !*next with blink = null; }; // e.flink.blink <- null
-      { lhead = (!*e).flink; ltail = h.ltail; }
-    )
-  ) else if h.ltail = e then ( // removing from the tail of the list, but the list will be non-empty
-    let prev = (!*e).blink in
-    prev *= { !*prev with flink = null; }; // e.blink.flink <- null
-    { lhead = h.lhead; ltail = (!*e).blink; }
-  ) else ( // removing from the middle of the list
-    let next = (!*e).flink in
-    let prev = (!*e).blink in
-    prev *= { !*prev with flink = next; };
-    next *= { !*next with blink = prev; };
-    h
-  )
-
-(** Insert e after prior, in list h *)
-let insertEntryAfter (#t:Type) (h:dlisthead t) (prior:pointer (dlist t)) (e:pointer (dlist t)): ST (dlisthead t)
-   (requires (fun _ -> true))
-   (ensures (fun _ _ _ -> true))
-=
-  if h.ltail = prior then ( // appending to the end of the list
-    insertTailList h e
-  ) else (
-    let next = (!*prior).flink in
-    prior *= { !*prior with flink = e };
-    e *= { !*e with blink=prior; flink=next };
-    next *={ !*next with blink = e };
-    h
-  )
-
-(** Insert e after next, in list h *)
-let insertEntryBefore (#t:Type) (h:dlisthead t) (next:pointer (dlist t)) (e:pointer (dlist t)): ST (dlisthead t)
-   (requires (fun _ -> true))
-   (ensures (fun _ _ _ -> true))
-=
-  if h.lhead = next then ( // adding to the front of the list
-    insertHeadList h e
-  ) else (
-    let prior = (!*next).blink in
-    prior *= { !*prior with flink = e };
-    e *= { !*e with blink=prior; flink=next };
-    next *= { !*next with blink = e };
-    h
-  )
 
 type err a =
   | Ok of a
@@ -168,8 +59,9 @@ type mitls_aead =
     | TLS_aead_AES_128_GCM
     | TLS_aead_AES_256_GCM
     | TLS_aead_CHACHA20_POLY1305
-    
+
 (** F* representation of mitls_secret, which is serialized into an array of bytes and pinned, for interop.  Used for FFI. *)
+noeq
 type mitls_secret = {
     (** hash type *)
     hash: mitls_hash;
@@ -182,6 +74,7 @@ type mitls_secret = {
 }
 
 (** A miTLS ticket *)
+noeq
 type mitls_ticket = {
     ticket_len: U64.t;
     ticket: buffer_t; // bugbug: an array of 1020 bytes, not a ptr
@@ -199,6 +92,7 @@ type quic_secret_native = mitls_secret_native
 type quic_ticket = mitls_ticket
 
 (** A segment of data within a stream *)
+noeq
 type qstream_segment_fixed = {
     (** Starting byte offset within the stream *)
     offset:U64.t;
@@ -215,11 +109,12 @@ type qstream_segment_fixed = {
 }
 
 (** Either on quic_stream.segments (for outgoing data), or on partialsegments or readysegments (for incoming data) *)
-type qstream_segment = dlist qstream_segment_fixed
-type qstream_segment_list = dlisthead qstream_segment_fixed
+type qstream_segment = DLL.node qstream_segment_fixed
+type qstream_segment_list = DLL.dll qstream_segment_fixed
 
 (** A fixed-value frame, queued for transmission.  Used for frames other than
     the dynamic ones (ACK, STREAM).  *)
+noeq
 type fixedframe_fixed = {
     (** Waitable event HANDLE, or 0 if the event is async *)
     hWait:intptr_t;
@@ -228,8 +123,8 @@ type fixedframe_fixed = {
 }
 
 (** A list of fixed-value frames *)
-type fixedframe = dlist fixedframe_fixed
-type fixedframe_list = dlisthead fixedframe_fixed
+type fixedframe = DLL.node fixedframe_fixed
+type fixedframe_list = DLL.dll fixedframe_fixed
 
 (** The QUIC view of a Send Stream *)
 type quic_send_stream_state =
@@ -250,6 +145,7 @@ type quic_recv_stream_state =
   | RecvStreamResetRead // terminal state
 
 (** Mutable portion of a QUIC stream *)
+noeq
 type quic_stream_mutable = {
   (* Receive-stream fields *)
   (** Current recv-stream state *)
@@ -275,20 +171,23 @@ type quic_stream_mutable = {
 }
 
 (** A QUIC stream of outgoing data *)
+noeq
 type quic_stream_fixed = {
     streamID: U64.t;
     qsm_state: (pointer quic_stream_mutable);
 }
 
-type quic_stream = dlist quic_stream_fixed
-type quic_stream_list = dlisthead quic_stream_fixed
+type quic_stream = DLL.node quic_stream_fixed
+type quic_stream_list = DLL.dll quic_stream_fixed
 
 (** Data required, in order to recover a CRYPTO frame from a lost packet *)
+noeq
 type cryptoRecoveryTracker = {
     cryptosegment: pointer qstream_segment;
     }
-    
+
 (** Data required, in order to recover a stream frame from a lost packet *)
+noeq
 type streamRecoveryTracker = {
     recoverystreamID: U64.t; // the ID isn't used, but helpful for debugging
     segment: pointer qstream_segment;
@@ -301,8 +200,8 @@ type ackblock_fixed = {
     length: U64.t;
     }
 
-type ackblock = dlist ackblock_fixed
-type ackblock_list = dlisthead ackblock_fixed
+type ackblock = DLL.node ackblock_fixed
+type ackblock_list = DLL.dll ackblock_fixed
 
 (* Indicies into the connection.packetSpaces array *)
 let psIndexInitial = 0ul
@@ -322,20 +221,23 @@ let indexOfPacketSpace (ps:packet_space): U32.t =
   | ApplicationSpace -> psIndexApplication
 
 (** Data required, in order to recover an ACK frame from a lost packet *)
+noeq
 type ackRecoveryTracker = {
     blocks: ackblock_list;
     }
 
+noeq
 type lossRecoveryTracker_fixed =
     | CryptoTracker of cryptoRecoveryTracker
     | StrmTracker of streamRecoveryTracker
     | AckTracker of ackblock_list
     | FixedFrameTracker of pointer fixedframe
 
-type lossRecoveryTracker = dlist lossRecoveryTracker_fixed
-type lossRecoveryTracker_list = dlisthead lossRecoveryTracker_fixed
+type lossRecoveryTracker = DLL.node lossRecoveryTracker_fixed
+type lossRecoveryTracker_list = DLL.dll lossRecoveryTracker_fixed
 
 (** Data associated with a sent packet, used to recover in case of loss *)
+noeq
 type sentPacket_fixed = {
     (** Time the packet was sent, in 100ns Windows ticks *)
     time: Int64.t;
@@ -346,11 +248,12 @@ type sentPacket_fixed = {
     tracker: lossRecoveryTracker_list;
     }
 
-type sentPacket = dlist sentPacket_fixed
-type sentPacket_list = dlisthead sentPacket_fixed
+type sentPacket = DLL.node sentPacket_fixed
+type sentPacket_list = DLL.dll sentPacket_fixed
 
 (** Mutable state related to the LossAndCongestion module.  Fields are generally
     all taken directly from the QUIC RFC. *)
+noeq
 type lossAndCongestion_mutable = {
     (** (fixed field) multi-modal alarm used for loss detection.  A PTP_TIMER *)
     loss_detection_alarm: intptr_t; // PTP_TIMER
@@ -387,7 +290,7 @@ type lossAndCongestion_mutable = {
 
     (** The RTT variance, computed as described in [RFC6298] *)
     rttvar: Int64.t;
-    
+
     (**The largest delta between the largest acked retransmittable packet
        and a packet containing retransmittable frames before it’s declared lost. *)
     reordering_threshold: U64.t;
@@ -395,11 +298,11 @@ type lossAndCongestion_mutable = {
     (** The reordering window as a fraction of max(smoothed_rtt, latest_rtt). *)
     time_reordering_fraction_numerator: Int64.t;
     time_reordering_fraction_denominator: Int64.t;
-    
-    (** The time at which the next packet will be considered lost based on early transmit or 
+
+    (** The time at which the next packet will be considered lost based on early transmit or
         exceeding the reordering window in time. *)
     loss_time: Int64.t;
-    
+
     (** An association of packet numbers to information about them, including a number field indicating
         the packet number, a time field indicating the time a packet was sent, and a bytes field
         indicating the packet’s size. sent_packets is ordered by packet number, and packets remain
@@ -425,40 +328,43 @@ type lossAndCongestion_mutable = {
 
     (** Maximum number of bytes in flight that may be sent. *)
     congestion_window: U64.t;
-    
-    (** Slow start threshold in bytes. When the congestion window is below ssthresh, it grows by the 
+
+    (** Slow start threshold in bytes. When the congestion window is below ssthresh, it grows by the
         number of bytes acknowledged for each ack. *)
     ssthresh: U64.t;
     }
 
 (** States of a QUIC connection *)
 type connection_state =
-    | Start 
+    | Start
     | ServerStatelessRetry
     | Running
     | Closed
 
 (** A queue of packets that have arrived but haven't been processed yet *)
+noeq
 type packet_holder_fixed = {
   packet:buffer_t;
   packetlen:U32.t;
 }
 
-type packet_holder = dlist packet_holder_fixed
-type packet_holder_list = dlisthead packet_holder_fixed
+type packet_holder = DLL.node packet_holder_fixed
+type packet_holder_list = DLL.dll packet_holder_fixed
 
-type stream_holder = dlist (pointer quic_stream)
-type stream_holder_list = dlisthead (pointer quic_stream)
+type stream_holder = DLL.node (pointer quic_stream)
+type stream_holder_list = DLL.dll (pointer quic_stream)
 
 (** A legal connection ID length *)
 type cil_t = cil:U8.t {U8.v cil = 0 || (4 <= (U8.v cil) && (U8.v cil) <= 18)}
 
+noeq
 type connectionid_t = {
     cil: cil_t;     // either 0, or 4..18
     cid: buffer_t;  // whose length in bytes is cil
     }
 
 (** A pair of crypto keys *)
+noeq
 type key_pair = {
     reader: quic_key;
     writer: quic_key;
@@ -484,6 +390,7 @@ let indexOfEpoch (epoch:epoch): U32.t =
   | Epoch1RTT -> epochIndex1RTT
 
 (** State associated with a packet space.  There are three spaces: Initial, Handshake, and Application *)
+noeq
 type packet_space_state = {
   (** next packet number to transmit with *)
   packetNumber: U64.t;
@@ -508,6 +415,7 @@ type packet_space_state = {
 }
 
 (** The mutable state related to a QUIC connection *)
+noeq
 type connection_mutable = {
     cstate: connection_state;
     closedReason: C.String.t; // set whenever the connection is closed
@@ -546,6 +454,7 @@ type connection_mutable = {
 type engine_t = intptr_t
 
 (** All state associated with a QUIC connection between two computers *)
+noeq
 type connection = {
     monitor: intptr_t;
     (** array of 4 key pairs (Initial, 0RTT, Handshake, 1RTT) *)
@@ -566,8 +475,8 @@ type connection = {
     packetSpaces: (pointer packet_space_state);
     }
 
-type connectionholder = dlist (pointer connection)
-type connectionholder_list = dlisthead (pointer connection)
+type connectionholder = DLL.node (pointer connection)
+type connectionholder_list = DLL.dll (pointer connection)
 
 (** New-connection callback.  It is passed the cbstate that was
     initially passed to quic_InitializeServer, along with the new
@@ -576,15 +485,17 @@ type connectionholder_list = dlisthead (pointer connection)
     and will be returned by quic_PreparePacket(). *)
 type newConnectionCallback = intptr_t -> (pointer_or_null connection) -> intptr_t
 
+noeq
 type versionreply_fixed = {
   replyid:connectionid_t;
   replyapp_state:intptr_t;
 }
 
-type versionreply = dlist versionreply_fixed
-type versionreply_list = dlisthead versionreply_fixed
+type versionreply = DLL.node versionreply_fixed
+type versionreply_list = DLL.dll versionreply_fixed
 
 (** All state associated with this client or server application *)
+noeq
 type engine = {
     eis_client:bool;
     emonitor: intptr_t;
