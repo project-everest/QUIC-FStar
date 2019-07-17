@@ -17,7 +17,13 @@ endif
 
 all: httpclient.exe pingfstar.exe httpserver.exe
 
-verify: DoublyLinkedList.fst-ver DoublyLinkedListIface.fst-ver DoublyLinkedListIface.fsti-ver
+FST_FILES=$(shell find . -name '*.fst')
+FSTI_FILES=$(shell find . -name '*.fsti')
+NOVERIFY_FILES=QUICConnection.fst QUICEngine.fst QUICFFI.fst QUICFrame.fst QUICLossAndCongestion.fst QUICMutators.fst QUICStream.fst QUICTLS.fst QUICTypes.fst QUICUtils.fst
+VERIFY_FILES=$(filter-out $(addprefix %,$(NOVERIFY_FILES)),$(FST_FILES) $(FSTI_FILES))
+VERIFY_TARGETS=$(addsuffix -ver,$(VERIFY_FILES))
+
+verify: $(VERIFY_TARGETS)
 
 -include .depend
 
@@ -39,9 +45,6 @@ FSTAR = fstar.exe $(FSTAR_ARGS)
 	@echo "[Verifying] $<"
 	@$(FSTAR) --cache_checked_modules --record_hints --use_hints $< >/dev/null
 	@echo "[Verified] $*"
-
-FST_FILES=$(shell find . -name '*.fst')
-FSTI_FILES=$(shell find . -name '*.fsti')
 
 dep.graph: $(FST_FILES) $(FSTI_FILES)
 	@echo "[Generating] $@"
