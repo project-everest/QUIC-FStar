@@ -51,9 +51,13 @@ dep.graph: $(FST_FILES) $(FSTI_FILES)
 	@$(FSTAR) --dep graph $^ 2>/dev/null 1>/dev/null
 	@echo "[Generated] $@"
 
+COMMA:=,
+NOVERIFY_MODULES = $(shell echo $(patsubst %.fst,%,$(patsubst %.fsti,%,$(NOVERIFY_FILES))) | tr '[:upper:].' '[:lower:]_')
+NOVERIFY_COLOR = $(patsubst %, "%" [style=filled$(COMMA) fillcolor=yellow], $(NOVERIFY_MODULES))
+
 %.png: %.graph
 	@echo "[Generating] $@"
-	@cat $< | grep -v fstar_ | grep -v lowstar_ | grep -v prims | tred | dot -Tpng -o$@
+	@cat $< | grep -v fstar_ | grep -v lowstar_ | grep -v prims | tred | sed '$$i $(NOVERIFY_COLOR)' | dot -Tpng -o$@
 	@echo "[Generated] $@"
 
 depgraph: dep.png
