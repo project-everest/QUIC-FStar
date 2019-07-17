@@ -17,16 +17,36 @@ endif
 
 all: httpclient.exe pingfstar.exe httpserver.exe
 
+verify: DoublyLinkedList.fst-ver DoublyLinkedListIface.fst-ver DoublyLinkedListIface.fsti-ver
+
+-include .depend
+
+%-ver: %.checked
+	@true
+
+%.checked:
+	@echo "[Verifying] $<"
+	@fstar.exe --cache_checked_modules --record_hints --use_hints $< >/dev/null
+	@echo "[Verified] $*"
+
 FST_FILES=$(shell find . -name '*.fst')
 FSTI_FILES=$(shell find . -name '*.fsti')
 
 dep.graph: $(FST_FILES) $(FSTI_FILES)
-	fstar.exe --dep graph $^ 2>/dev/null 1>/dev/null
+	@echo "[Generating dependencies]"
+	@fstar.exe --dep graph $^ 2>/dev/null 1>/dev/null
+	@echo "[Generated dependencies]"
 
 %.png: %.graph
 	cat $< | grep -v fstar_ | grep -v lowstar_ | grep -v prims | tred | dot -Tpng -o$@
 
 depgraph: dep.png
+
+depend: .depend
+	@true
+
+.depend: $(FST_FILES) $(FSTI_FILES)
+	fstar.exe --dep full $^ 2>/dev/null >.depend
 
 QUIC_OBJS = QUICTypes.o QUICMutators.o QUICUtils.o QUICFFI.o QUICConnection.o QUICStream.o QUICFrame.o QUICLossAndCongestion.o QUICEngine.o QUICTLS.o QUICFStar.o $(MITLS_LIBS) $(KREMLIN_HOME)/kremlib/dist/generic/libkremlib.a C_Failure.o
 

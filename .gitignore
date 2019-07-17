@@ -18,3 +18,5 @@ Makefile.include
 Makefile.basic
 dep.graph
 dep.png
+.depend
+*.checked
