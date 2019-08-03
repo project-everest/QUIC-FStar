@@ -48,6 +48,14 @@ unfold let (^@) (a:B.pointer_or_null 't{a =!= B.null}) (h0:HS.mem) = B.get h0 a 
 let node a = B.pointer (DLL.node a)
 let dll a = B.pointer (DLL.dll a)
 
+let nnode a = B.pointer_or_null (DLL.node a)
+
+let lemma_nnode_subtyping a = ()
+
+let f a (n:nnode a) =
+  assert ((n `has_type` (node a) /\ not (B.g_is_null n)) \/
+          (~(n `has_type` (node a)) /\ B.g_is_null n))
+
 /// Abstract Validity Predicates
 
 let node_valid h n = True /\ B.live h n // XXX: why do I need the True here?

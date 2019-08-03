@@ -489,5 +489,5 @@ let getPacketProtectionMask (mask:buffer_t) (key:quic_key) (packet:buffer_t) (le
   else
     U32.(pnOffset +^ 4ul) in
   let r = quic_crypto_packet_number_otp key (B.offset packet sample_offset) mask in
-  if r = 0ul then failwith (C.String.of_literal "quic_crypto_packet_number_otp failed!");
+  if r = 0l then failwith (C.String.of_literal "quic_crypto_packet_number_otp failed!");
   pop_frame()

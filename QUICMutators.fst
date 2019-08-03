@@ -22,15 +22,17 @@ module U16 = FStar.UInt16
 module B = LowStar.Buffer
 module Cast = FStar.Int.Cast
 
+module DLL = DoublyLinkedListIface
+
 //
 // quic_stream
 //
 
 (** Get a readonly copy of the mutable part of a quic_stream *)
-let strm_get_mutable (strm: pointer quic_stream): ST (quic_stream_mutable)
+let strm_get_mutable (strm: quic_stream): ST (quic_stream_mutable)
    (requires (fun _ -> true))   (ensures (fun _ _ _ -> true)) =
-  let strm' = !*strm in
-  !*(strm'.p.qsm_state)
+  let strm' = DLL.node_val strm in
+  !*(strm'.qsm_state)
 
 let upd_recvstate (strmm:pointer quic_stream_mutable) (newstate:quic_recv_stream_state): ST unit
    (requires (fun _ -> true)) (ensures (fun _ _ _ -> true)) =

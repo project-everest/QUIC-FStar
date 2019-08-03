@@ -29,6 +29,12 @@ val node (a:Type0) : Type0
 (** A doublylinkedlist of elements of type [a] *)
 val dll (a:Type0) : Type0
 
+val nnode (a:Type0) : Type0
+
+val lemma_nnode_subtyping (a:Type0) :
+  Lemma
+    (node a `subtype_of` nnode a)
+
 /// Abstract Validity Predicates
 
 val node_valid (h:HS.mem) (n:node 'a) : prop

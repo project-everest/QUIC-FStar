@@ -30,6 +30,8 @@ module U8 = FStar.UInt8
 module Cast = FStar.Int.Cast
 module B = LowStar.Buffer
 
+module DLL = DoublyLinkedListIface
+
 let isStreamBidi (stream:U64.t): bool
 =
   let bit = U64.(stream &^ 2UL) in
@@ -51,13 +53,13 @@ let isStreamServerInitiated (stream:U64.t): bool
   bit <> 0UL
 
 (** Determine if a stream has segments ready to send *)
-let hasMoreToSend (strm:pointer quic_stream): ST bool
+let hasMoreToSend (strm:quic_stream): ST bool
    (requires (fun _ -> true))
    (ensures (fun _ _ _ -> true))
 =
   push_frame();
   let strmm = strm_get_mutable strm in
-  let hasmore = if (is_null strmm.segments.lhead) then false else true in
+  let hasmore = if  DLL.is_empty strmm.segments then false else true in
   pop_frame();
   hasmore
 
@@ -73,12 +75,12 @@ let findReadyStream (cs:pointer connection): ST (pointer_or_null quic_stream)
     if U64.(csm.dataSent >=^ csm.maxDataPeer) then
       null // Not permitted to send more stream data when the connection  is at maxDataPeer
     else (
-      let head = (!*((!*cs).csm_state)).streams.lhead in
+      let head : quic_stream = DLL.dll_head (!*((!*cs).csm_state)).streams in
       let pp = B.alloca head 1ul in
-      let pstrm = B.alloca null 1ul in
-      let headisnull = is_null head in
+      let pstrm = B.alloca head 1ul in (* REVIEW[jb]: changed null to head here, is it ok? *)
+      let headisnull = DLL.is_empty (!*((!*cs).csm_state)).streams in
       let pstop = B.alloca headisnull 1ul in
-      let inv h = B.live h pp in
+      let inv h = DLL.node_valid h (B.get h pp 0) in
       let test (): Stack bool (requires inv) (ensures (fun _ _ -> inv)) =
         not !*pstop
       in
@@ -87,11 +89,11 @@ let findReadyStream (cs:pointer connection): ST (pointer_or_null quic_stream)
         if isready then (
           pstrm *= !*pp
           );
-        pp *= (!*(!*pp)).flink;
-        pstop *= ((is_null !*pp) || isready)
+        pp *= DLL.next_node (!*((!*cs).csm_state)).streams (!*pp);
+        pstop *= ((DLL.has_next (!*((!*cs).csm_state)).streams (!*pp)) || isready)
       in
       C.Loops.while test body;
-      !*pstrm
+      pstrm
       ) in
   pop_frame();
   strm
@@ -117,20 +119,20 @@ let connectionHasMoreToSend (cs:pointer connection): ST (option packet_space)
     if csm.cstate <> Running then
       None
     else if U32.(epochIndex >=^ epochIndexInitial) then (
-      if hasMoreToSend pssInitial.crypto_stream ||
+      if hasMoreToSend !*pssInitial.crypto_stream ||
          (pssInitial.sendAckOnlyIfNeeded && pssInitial.outgoingAckCount <> 0ul)then
         Some InitialSpace
       else if U32.(epochIndex >=^ epochIndexHandshake) then (
         let pssHandshake = getPacketSpaceState cs HandshakeSpace in
-        if hasMoreToSend pssHandshake.crypto_stream ||
+        if hasMoreToSend !*pssHandshake.crypto_stream ||
            (pssHandshake.sendAckOnlyIfNeeded && pssHandshake.outgoingAckCount <> 0ul) then (
           Some HandshakeSpace
         ) else if epochIndex = epochIndex1RTT then (
           let pssApplication = getPacketSpaceState cs ApplicationSpace in
-          let fixedframeListEmpty = is_null csm.fixedframes.lhead in
+          let fixedframeListEmpty = DLL.is_empty csm.fixedframes in
           let hasMore = csm.pingPending ||
                         not fixedframeListEmpty ||
-                        hasMoreToSend pssApplication.crypto_stream ||
+                        hasMoreToSend !*pssApplication.crypto_stream ||
                         (pssApplication.sendAckOnlyIfNeeded && pssApplication.outgoingAckCount <> 0ul) ||
                         not (is_null (findReadyStream cs)) in
           if hasMore then Some ApplicationSpace else None
@@ -154,10 +156,10 @@ let enqueueFixedFrame (cs:pointer connection) (data:buffer_t) (len:U32.t): ST in
   push_frame();
   let hWait = createEvent 0l 0l in
   let fixed = { hWait = hWait; framedata = data; framelength = len; } in
-  let pff = B.malloc HyperStack.root (empty_entry fixed) 1ul in
+  let pff = DLL.node_of fixed in
   let csm = conn_get_mutable cs in
-  let list = insertTailList csm.fixedframes pff in
-  upd_fixedframes (!*cs).csm_state list;
+  DLL.dll_insert_at_tail csm.fixedframes pff;
+  upd_fixedframes (!*cs).csm_state csm.fixedframes;
   pop_frame();
   hWait
 
@@ -168,10 +170,10 @@ let enqueueAsyncFixedFrame (cs:pointer connection) (data:buffer_t) (len:U32.t): 
 =
   push_frame();
   let fixed = { hWait = nullptr; framedata = data; framelength = len; } in
-  let pff = B.malloc HyperStack.root (empty_entry fixed) 1ul in
+  let pff = DLL.node_of fixed in
   let csm = conn_get_mutable cs in
-  let list = insertTailList csm.fixedframes pff in
-  upd_fixedframes (!*cs).csm_state list;
+  DLL.dll_insert_at_tail csm.fixedframes pff;
+  upd_fixedframes (!*cs).csm_state csm.fixedframes;
   pop_frame()
 
 (** Add the connection to the engine's ready-to-send list *)
@@ -181,10 +183,10 @@ let setHasReadyToSend (cs:pointer connection): ST unit
 =
   push_frame();
   let eng = from_engine_t (!*cs).eng in
-  let pholder = B.malloc HyperStack.root (empty_entry cs) 1ul in
+  let pholder = DLL.node_of cs in
   monitorEnter (!*eng).emonitor;
-  let list = insertTailList (!*eng).readyconnections pholder in
-  upd_readyconnections eng list;
+  DLL.dll_insert_at_tail (!*eng).readyconnections pholder;
+  upd_readyconnections eng (!*eng).readyconnections;
   setEvent (!*eng).dataReadyToSend;
   monitorExit (!*eng).emonitor;
   pop_frame()
@@ -229,23 +231,23 @@ let findStream (csm:connection_mutable) (stream:U64.t): ST (pointer_or_null quic
    (ensures (fun _ _ _ -> true))
 =
   push_frame();
-  let head = csm.streams.lhead in
-  let pp = B.alloca head 1ul in
-  let pstrm = B.alloca null 1ul in
+  let head = DLL.dll_head csm.streams in
+  let pp : pointer_or_null quic_stream = B.alloca head 1ul in
+  let pstrm = B.alloca head 1ul in
   let inv h = B.live h pp in
   let test (): Stack bool (requires inv) (ensures (fun _ _ -> inv)) =
-    not (is_null !*pp)
+    DLL.has_next csm.streams !*pp
   in
   let body (): Stack unit (requires inv) (ensures (fun _ _ -> inv)) =
-    if (!*(!*pp)).p.streamID = stream then (
+    if (DLL.node_val (!*pp)).streamID = stream then (
       pstrm *= !*pp;
-      pp *= null
+      pp *= admit ()
     ) else (
-      pp *= (!*(!*pp)).flink
+      pp *= DLL.next_node csm.streams (!*pp)
     )
   in
   C.Loops.while test body;
-  let strm = !*pstrm in
+  let strm = pstrm in
   pop_frame();
   strm
 
