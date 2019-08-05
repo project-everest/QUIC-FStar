@@ -22,8 +22,15 @@ FSTI_FILES=$(shell find . -name '*.fsti')
 NOVERIFY_FILES=QUICConnection.fst QUICEngine.fst QUICFFI.fst QUICFrame.fst QUICLossAndCongestion.fst QUICMutators.fst QUICStream.fst QUICTLS.fst QUICUtils.fst
 VERIFY_FILES=$(filter-out $(addprefix %,$(NOVERIFY_FILES)),$(FST_FILES) $(FSTI_FILES))
 VERIFY_TARGETS=$(addsuffix -ver,$(VERIFY_FILES))
+LAXVERIFY_TARGETS=$(addsuffix -verlax,$(NOVERIFY_FILES))
 
 verify: $(VERIFY_TARGETS)
+
+laxverify: $(LAXVERIFY_TARGETS)
+
+.cache.lax:
+	mkdir -p .cache.lax
+	cp $(FSTAR_HOME)/ulib/.cache.lax/* .cache.lax/
 
 -include .depend
 
@@ -37,6 +44,14 @@ FSTAR = fstar.exe $(FSTAR_ARGS)
 
 %-ver: %.checked
 	@true
+
+%-verlax: .cache.lax .cache.lax/%.checked.lax
+	@true
+
+.cache.lax/%.checked.lax: %
+	@echo "\e[1m[Lax Checking]\e[0m $<"
+	@$(FSTAR) --lax $< --cache_dir .cache.lax/ >/dev/null
+	@echo "\e[1m[Lax Checked]\e[0m $*"
 
 %-in:
 	@echo $(FSTAR_INCLUDE_ARGS)
