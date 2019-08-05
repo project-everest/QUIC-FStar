@@ -1,6 +1,27 @@
 [
-  "˛w%\u007fùa>Æ\u0016ºÆoÅ•Õ_",
+  "\u001a>ù˙Miâ4F¯\"ã§dw\u0018",
   [
+    [
+      "DoublyLinkedListIface.coerce_non_null",
+      1,
+      2,
+      1,
+      [
+        "@query",
+        "lemma_DoublyLinkedListIface.auto_node_subtype_or_null_of_nullable_node"
+      ],
+      0,
+      "7734ad1a0a6a105a5433dc14399a81f6"
+    ],
+    [
+      "DoublyLinkedListIface.nullable_node_valid",
+      1,
+      2,
+      1,
+      [ "@query" ],
+      0,
+      "5b95177a67c4f77d6bea924cb26a7a80"
+    ],
     [
       "DoublyLinkedListIface.g_node_vals",
       1,
@@ -15,7 +36,7 @@
         "fuel_guarded_inversion_Prims.list", "subterm_ordering_Prims.Cons"
       ],
       0,
-      "4e6e1128df8b885b4d261c3107525867"
+      "7d64224868e91eac708af498043c9bfb"
     ],
     [
       "DoublyLinkedListIface.dll_head",
@@ -28,14 +49,15 @@
         "@query", "constructor_distinct_Tm_unit", "disc_equation_Prims.Cons",
         "equation_Prims.nat",
         "equation_with_fuel_FStar.List.Tot.Base.length.fuel_instrumented",
-        "int_inversion", "projection_inverse_BoxBool_proj_0",
-        "refinement_interpretation_Tm_refine_3aac47f90ec5f312f230a639872610fd",
+        "int_inversion", "primitive_Prims.op_Equality",
+        "projection_inverse_BoxBool_proj_0",
         "refinement_interpretation_Tm_refine_542f9d4f129664613f2483a6c88bc7c2",
+        "typing_DoublyLinkedListIface.as_list",
         "typing_DoublyLinkedListIface.node",
         "typing_FStar.List.Tot.Base.length"
       ],
       0,
-      "126d66016edd23b2b6949fd8a3f68ea0"
+      "417df1176244b9d9d27d8a4e1dcce089"
     ],
     [
       "DoublyLinkedListIface.dll_tail",
@@ -43,11 +65,35 @@
       2,
       1,
       [
-        "@MaxIFuel_assumption", "@query",
-        "refinement_interpretation_Tm_refine_3aac47f90ec5f312f230a639872610fd"
+        "@query", "primitive_Prims.op_Equality",
+        "projection_inverse_BoxBool_proj_0"
       ],
       0,
-      "62fcadaddde2135f01dfd166302aa4d5"
+      "b36af86f2c0388991c21b06b513c7bca"
+    ],
+    [
+      "DoublyLinkedListIface.fast_has_next",
+      1,
+      2,
+      1,
+      [
+        "@MaxIFuel_assumption", "@query",
+        "refinement_interpretation_Tm_refine_6bceef2fe1a51f9aee1e75c41c68a03e"
+      ],
+      0,
+      "642fc40c2e4ec929b9ac0ef84cf8c381"
+    ],
+    [
+      "DoublyLinkedListIface.fast_has_prev",
+      1,
+      2,
+      1,
+      [
+        "@MaxIFuel_assumption", "@query",
+        "refinement_interpretation_Tm_refine_6bceef2fe1a51f9aee1e75c41c68a03e"
+      ],
+      0,
+      "7b609584e5225d0746334dbd13898133"
     ],
     [
       "DoublyLinkedListIface.has_next",
@@ -56,10 +102,12 @@
       1,
       [
         "@MaxIFuel_assumption", "@query",
-        "refinement_interpretation_Tm_refine_6bceef2fe1a51f9aee1e75c41c68a03e"
+        "refinement_interpretation_Tm_refine_5a42429d459baac3f70a9ceb8e1ec404",
+        "refinement_interpretation_Tm_refine_ffa83f16a08ac832db3619b038238874",
+        "typing_DoublyLinkedListIface.g_is_null_node"
       ],
       0,
-      "56db0aa6f0cc0783558ab17682364eaa"
+      "c33619e267757ed2959b51f91ca27bd3"
     ],
     [
       "DoublyLinkedListIface.has_prev",
@@ -68,10 +116,12 @@
       1,
       [
         "@MaxIFuel_assumption", "@query",
-        "refinement_interpretation_Tm_refine_6bceef2fe1a51f9aee1e75c41c68a03e"
+        "refinement_interpretation_Tm_refine_5a42429d459baac3f70a9ceb8e1ec404",
+        "refinement_interpretation_Tm_refine_ffa83f16a08ac832db3619b038238874",
+        "typing_DoublyLinkedListIface.g_is_null_node"
       ],
       0,
-      "f95ccb455c116b99c59edd6da1421cc4"
+      "27abb9729381dd04a479bba635b63383"
     ],
     [
       "DoublyLinkedListIface.next_node",
@@ -79,15 +129,21 @@
       2,
       1,
       [
-        "@MaxIFuel_assumption", "@query", "equation_Prims.nat",
-        "primitive_Prims.op_Addition", "primitive_Prims.op_Subtraction",
+        "@MaxIFuel_assumption",
+        "@fuel_correspondence_FStar.List.Tot.Properties.index_of.fuel_instrumented",
+        "@query", "equation_Prims.nat", "primitive_Prims.op_Addition",
+        "primitive_Prims.op_LessThan", "primitive_Prims.op_Negation",
+        "primitive_Prims.op_Subtraction",
+        "projection_inverse_BoxBool_proj_0",
         "projection_inverse_BoxInt_proj_0",
-        "refinement_interpretation_Tm_refine_4b7f486949c030b94228e6106566a490",
         "refinement_interpretation_Tm_refine_542f9d4f129664613f2483a6c88bc7c2",
-        "refinement_interpretation_Tm_refine_ce52b7121c636592230bd67a03c02599"
+        "refinement_interpretation_Tm_refine_7a3b887478da9d11fd253c0bb94bb7ba",
+        "refinement_interpretation_Tm_refine_ce52b7121c636592230bd67a03c02599",
+        "refinement_interpretation_Tm_refine_ffa83f16a08ac832db3619b038238874",
+        "typing_DoublyLinkedListIface.g_is_null_node"
       ],
       0,
-      "acdfd35b21646f66ad66a7783807de40"
+      "f294de7fa40dded88329b8356d22ee73"
     ],
     [
       "DoublyLinkedListIface.prev_node",
@@ -95,13 +151,19 @@
       2,
       1,
       [
-        "@MaxIFuel_assumption", "@query", "primitive_Prims.op_Subtraction",
+        "@MaxIFuel_assumption",
+        "@fuel_correspondence_FStar.List.Tot.Properties.index_of.fuel_instrumented",
+        "@query", "primitive_Prims.op_GreaterThan",
+        "primitive_Prims.op_Negation", "primitive_Prims.op_Subtraction",
+        "projection_inverse_BoxBool_proj_0",
         "projection_inverse_BoxInt_proj_0",
-        "refinement_interpretation_Tm_refine_98e6e2f79e76c56949096085c8061d51",
-        "refinement_interpretation_Tm_refine_ce52b7121c636592230bd67a03c02599"
+        "refinement_interpretation_Tm_refine_7a3b887478da9d11fd253c0bb94bb7ba",
+        "refinement_interpretation_Tm_refine_ce52b7121c636592230bd67a03c02599",
+        "refinement_interpretation_Tm_refine_ffa83f16a08ac832db3619b038238874",
+        "typing_DoublyLinkedListIface.g_is_null_node"
       ],
       0,
-      "198962988a74b85253c808b1b5772313"
+      "09ff8fa5cd3dd6a0d0a31d0c9214069a"
     ],
     [
       "DoublyLinkedListIface.l_insert_before",
@@ -113,7 +175,7 @@
         "refinement_interpretation_Tm_refine_18b4556aabc6626d8d5bc2bb83aa5d71"
       ],
       0,
-      "3b646bce5e51c755130252c1bc24ef83"
+      "70f698620d0daa3d6b61a07a9cdaca84"
     ],
     [
       "DoublyLinkedListIface.l_insert_after",
@@ -140,7 +202,7 @@
         "typing_FStar.Pervasives.Native.__proj__Mktuple2__item___2"
       ],
       0,
-      "4c43c0bb76e1ff2345a4ecb6193cfde0"
+      "fbab07ee69ebc24ed0abb053bbc8ed6f"
     ],
     [
       "DoublyLinkedListIface.l_insert_after'",
@@ -159,7 +221,7 @@
         "typing_FStar.Pervasives.Native.__proj__Mktuple2__item___2"
       ],
       0,
-      "f8e49d7b7324766ef366a80c4fd31b7b"
+      "36af048830dfb86a0ff8cf064abec3de"
     ],
     [
       "DoublyLinkedListIface.l_remove_head",
@@ -178,7 +240,7 @@
         "typing_FStar.List.Tot.Base.length"
       ],
       0,
-      "c1ecdb7ea7619b52a5eb636867855515"
+      "de96710fd4f3357adf3b7b68bd0fef8b"
     ],
     [
       "DoublyLinkedListIface.l_remove_mid",
@@ -203,7 +265,7 @@
         "typing_FStar.Pervasives.Native.__proj__Mktuple2__item___2"
       ],
       0,
-      "016a6b462d46089a19c037e10bf1f2b9"
+      "731b32d72fa3e1bd9d8d2209ad5275f0"
     ],
     [
       "DoublyLinkedListIface.l_remove_mid'",
@@ -224,7 +286,7 @@
         "typing_FStar.Pervasives.Native.__proj__Mktuple2__item___2"
       ],
       0,
-      "4d74d6e7367c55de6dcb8eae12b68a2c"
+      "69c91261130a9a5434729fe334848ca5"
     ],
     [
       "DoublyLinkedListIface.dll_insert_before",
@@ -236,7 +298,7 @@
         "refinement_interpretation_Tm_refine_4d912e105966ac35136c583fe866a795"
       ],
       0,
-      "f797aa63d51da31104150885385ea027"
+      "066934c5784d2294478b6d0e3e9f0dbe"
     ],
     [
       "DoublyLinkedListIface.dll_insert_after",
@@ -252,7 +314,7 @@
         "refinement_interpretation_Tm_refine_ce52b7121c636592230bd67a03c02599"
       ],
       0,
-      "fe26ecb9f2421d777bad6113e3ff50e9"
+      "d6253350dfc08e966f2d9b5af873accd"
     ],
     [
       "DoublyLinkedListIface.dll_remove_head",
@@ -284,7 +346,7 @@
         "typing_DoublyLinkedListIface.node"
       ],
       0,
-      "cc20811640c15cf29fe82933ffcbc29f"
+      "f0d9a8144098f1d08ca156aa1023a939"
     ],
     [
       "DoublyLinkedListIface.dll_remove_tail",
@@ -316,7 +378,7 @@
         "typing_DoublyLinkedListIface.node"
       ],
       0,
-      "f66a751bfb72592dad11aef4d6a356bb"
+      "1d7759bd75419eed70cfe8226426458a"
     ],
     [
       "DoublyLinkedListIface.dll_remove_mid",
@@ -343,7 +405,7 @@
         "typing_DoublyLinkedListIface.node"
       ],
       0,
-      "854165cbbc0516fc12fbbe34d54fb4c2"
+      "9383e01e98da2563d1d27976f10fb3b7"
     ],
     [
       "DoublyLinkedListIface.dll_split_using",
@@ -355,7 +417,7 @@
         "refinement_interpretation_Tm_refine_75b973181c1e06bed5da9965f6c8c60c"
       ],
       0,
-      "a059c014b4acf7329b33aef56bc57217"
+      "41f4c268573b5eac1e169b6d2f740069"
     ]
   ]
 ]
