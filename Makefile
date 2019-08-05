@@ -50,7 +50,7 @@ FSTAR = fstar.exe $(FSTAR_ARGS)
 	@true
 
 .PRECIOUS: .cache.lax/%.checked.lax %.checked
-.PHONY: %-ver %-verlax
+.PHONY: %-ver %-verlax .cache.lax/%.checked.lax
 
 .cache.lax/%.checked.lax: %
 	@echo "\e[1m[Lax Checking]\e[0m $<"
