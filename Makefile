@@ -42,23 +42,23 @@ FSTAR = fstar.exe $(FSTAR_ARGS)
 	@echo $(FSTAR_INCLUDE_ARGS)
 
 %.checked:
-	@echo "[Verifying] $<"
+	@echo "\e[1m[Verifying]\e[0m $<"
 	@$(FSTAR) --cache_checked_modules --record_hints --use_hints $< >/dev/null
-	@echo "[Verified] $*"
+	@echo "\e[1m[Verified]\e[0m $*"
 
 dep.graph: $(FST_FILES) $(FSTI_FILES)
-	@echo "[Generating] $@"
+	@echo "[Generating]\e[0m $@"
 	@$(FSTAR) --dep graph $^ 2>/dev/null 1>/dev/null
-	@echo "[Generated] $@"
+	@echo "\e[1m[Generated]\e[0m $@"
 
 COMMA:=,
 NOVERIFY_MODULES = $(shell echo $(patsubst %.fst,%,$(patsubst %.fsti,%,$(NOVERIFY_FILES))) | tr '[:upper:].' '[:lower:]_')
 NOVERIFY_COLOR = $(patsubst %, "%" [style=filled$(COMMA) fillcolor=yellow], $(NOVERIFY_MODULES))
 
 %.png: %.graph
-	@echo "[Generating] $@"
+	@echo "\e[1m[Generating]\e[0m $@"
 	@cat $< | grep -v fstar_ | grep -v lowstar_ | grep -v prims | tred | sed '$$i $(NOVERIFY_COLOR)' | dot -Tpng -o$@
-	@echo "[Generated] $@"
+	@echo "\e[1m[Generated]\e[0m $@"
 
 depgraph: dep.png
 
@@ -66,9 +66,9 @@ depend: .depend
 	@true
 
 .depend: $(FST_FILES) $(FSTI_FILES)
-	@echo "[Generating dependencies]"
+	@echo "\e[1m[Generating dependencies]\e[0m"
 	@$(FSTAR) --dep full $^ 2>/dev/null >.depend
-	@echo "[Generated dependencies]"
+	@echo "\e[1m[Generated dependencies]\e[0m"
 
 QUIC_OBJS = QUICTypes.o QUICMutators.o QUICUtils.o QUICFFI.o QUICConnection.o QUICStream.o QUICFrame.o QUICLossAndCongestion.o QUICEngine.o QUICTLS.o QUICFStar.o $(MITLS_LIBS) $(KREMLIN_HOME)/kremlib/dist/generic/libkremlib.a C_Failure.o
 
