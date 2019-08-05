@@ -82,12 +82,10 @@ NOVERIFY_COLOR = $(patsubst %, "%" [style=filled$(COMMA) fillcolor=yellow], $(NO
 depgraph: dep.png
 
 depend: .depend
-	@true
+	echo "\e[1m[Generated dependencies]\e[0m"
 
 .depend: $(FST_FILES) $(FSTI_FILES)
-	@echo "\e[1m[Generating dependencies]\e[0m"
 	@$(FSTAR) --dep full $^ 2>/dev/null >.depend
-	@echo "\e[1m[Generated dependencies]\e[0m"
 
 QUIC_OBJS = QUICTypes.o QUICMutators.o QUICUtils.o QUICFFI.o QUICConnection.o QUICStream.o QUICFrame.o QUICLossAndCongestion.o QUICEngine.o QUICTLS.o QUICFStar.o $(MITLS_LIBS) $(KREMLIN_HOME)/kremlib/dist/generic/libkremlib.a C_Failure.o
 
