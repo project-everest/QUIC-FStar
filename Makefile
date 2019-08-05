@@ -19,7 +19,7 @@ all: httpclient.exe pingfstar.exe httpserver.exe
 
 FST_FILES=$(shell find . -name '*.fst')
 FSTI_FILES=$(shell find . -name '*.fsti')
-NOVERIFY_FILES=QUICConnection.fst QUICEngine.fst QUICFFI.fst QUICFrame.fst QUICLossAndCongestion.fst QUICMutators.fst QUICStream.fst QUICTLS.fst QUICUtils.fst
+NOVERIFY_FILES=QUICUtils.fst QUICMutators.fst QUICFFI.fst QUICTLS.fst QUICStream.fst QUICLossAndCongestion.fst QUICFrame.fst QUICConnection.fst QUICEngine.fst
 VERIFY_FILES=$(filter-out $(addprefix %,$(NOVERIFY_FILES)),$(FST_FILES) $(FSTI_FILES))
 VERIFY_TARGETS=$(addsuffix -ver,$(VERIFY_FILES))
 LAXVERIFY_TARGETS=$(addsuffix -verlax,$(NOVERIFY_FILES))
