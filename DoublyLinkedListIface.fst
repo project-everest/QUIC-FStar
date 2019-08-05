@@ -46,15 +46,8 @@ unfold let (^@) (a:B.pointer_or_null 't{a =!= B.null}) (h0:HS.mem) = B.get h0 a 
 /// be confusing.
 
 let node a = B.pointer (DLL.node a)
+let nullable_node a = B.pointer_or_null (DLL.node a)
 let dll a = B.pointer (DLL.dll a)
-
-let nnode a = B.pointer_or_null (DLL.node a)
-
-let lemma_nnode_subtyping a = ()
-
-let f a (n:nnode a) =
-  assert ((n `has_type` (node a) /\ not (B.g_is_null n)) \/
-          (~(n `has_type` (node a)) /\ B.g_is_null n))
 
 /// Abstract Validity Predicates
 
@@ -82,6 +75,16 @@ let node_val n =
 
 let node_of v =
   B.alloca (DLL.empty_node v) 1ul
+
+/// Nullable Nodes
+
+let null_node #a = B.null #(DLL.node a)
+
+let g_is_null_node n = B.g_is_null n
+
+let auto_node_subtype_or_null_of_nullable_node #a n = ()
+
+let is_null_node n = B.is_null n
 
 /// Abstract Predicate to help "recall" that updating the payload
 /// leaves connections unchanged
@@ -127,7 +130,7 @@ let dll_head d =
 
 let dll_tail d =
   let h0 = HST.get () in
-  L.lemma_unsnoc_is_last (as_list h0 d);
+  if L.length (as_list h0 d) > 0 then L.lemma_unsnoc_is_last (as_list h0 d) else ();
   (!*d).DLL.ltail
 
 /// Useful auxiliary lemmas
@@ -523,7 +526,7 @@ let rec _lemma_length_g_node_vals (h0:HS.mem) (l:list (node 'a)) :
 
 /// Moving forwards or backwards in a list
 
-let has_next d n =
+let fast_has_next d n =
   let h0 = HST.get () in
   DLL.lemma_dll_links_contained h0 (d@h0) (as_list h0 d `L.index_of` n);
   L.lemma_unsnoc_is_last (as_list h0 d);
@@ -538,7 +541,7 @@ let has_next d n =
          (L.length (as_list h0 d) - 1));
   y
 
-let has_prev d n =
+let fast_has_prev d n =
   let h0 = HST.get () in
   DLL.lemma_dll_links_contained h0 (d@h0) (as_list h0 d `L.index_of` n);
   L.lemma_unsnoc_is_last (as_list h0 d);
@@ -553,16 +556,36 @@ let has_prev d n =
          0);
   y
 
+let has_next d n =
+  let h0 = HST.get () in
+  if is_null_node n then
+    false
+  else
+    fast_has_next d n
+
+let has_prev d n =
+  let h0 = HST.get () in
+  if is_null_node n then
+    false
+  else
+    fast_has_prev d n
+
 let next_node d n =
   let h0 = HST.get () in
   lemma_node_in_valid_dll_is_valid h0 d n;
-  DLL.extract_nodelist_conn h0 (as_list h0 d) (L.index_of (as_list h0 d) n);
+  if L.index_of (as_list h0 d) n < L.length (as_list h0 d) - 1 then (
+    DLL.extract_nodelist_conn h0 (as_list h0 d) (L.index_of (as_list h0 d) n)
+  ) else (
+    L.lemma_unsnoc_is_last (as_list h0 d)
+  );
   (!*n).DLL.flink
 
 let prev_node d n =
   let h0 = HST.get () in
   lemma_node_in_valid_dll_is_valid h0 d n;
-  DLL.extract_nodelist_conn h0 (as_list h0 d) (L.index_of (as_list h0 d) n - 1);
+  if L.index_of (as_list h0 d) n > 0 then (
+    DLL.extract_nodelist_conn h0 (as_list h0 d) (L.index_of (as_list h0 d) n - 1)
+  ) else ();
   (!*n).DLL.blink
 
 /// Stateful DoublyLinkedList operations
@@ -728,6 +751,46 @@ let dll_insert_after #t n' d n =
   // assert (B.modifies (fp_dll h1 d) h0 h1);
   HST.pop_frame ();
   let h11 = HST.get () in
+  _lemma_split_using_splitAt (as_list h00 d) n';
+  _lemma_append_g_node_vals h11
+    (fst (L.splitAt (as_list h00 d `L.index_of` n') (as_list h00 d)))
+    (snd (L.splitAt (as_list h00 d `L.index_of` n') (as_list h00 d)));
+  L.lemma_splitAt_append (as_list h00 d `L.index_of` n') (as_list h00 d);
+  _lemma_length_g_node_vals h00 (as_list h00 d);
+  L.lemma_splitAt_append (as_list h00 d `L.index_of` n') (g_node_vals h00 (as_list h00 d));
+  _lemma_insertion_maintains_unchanged_node_vals h0 h1 (as_list h0 d) (as_list h1 d) n' n;
+  _lemma_unchanged_node_vals_maintains_changes h00 h11 (as_list h00 d);
+  L.lemma_splitAt_append (as_list h00 d `L.index_of` n') (g_node_vals h00 (as_list h00 d));
+  _lemma_length_g_node_vals h11 (fst (L.splitAt (as_list h00 d `L.index_of` n') (as_list h00 d)));
+  L.append_length_inv_head
+    (g_node_vals h11 (fst (L.splitAt (as_list h00 d `L.index_of` n') (as_list h00 d))))
+    (g_node_vals h11 (snd (L.splitAt (as_list h00 d `L.index_of` n') (as_list h00 d))))
+    (fst (L.splitAt (as_list h00 d `L.index_of` n') (g_node_vals h00 (as_list h00 d))))
+    (snd (L.splitAt (as_list h00 d `L.index_of` n') (g_node_vals h00 (as_list h00 d))));
+  _lemma_insertion_maintains_memP (as_list h0 d) (as_list h1 d) n' n n;
+  _lemma_extract_unchanged_node_val h0 h1 n (as_list h1 d);
+  _lemma_append_g_node_vals h11
+    (let l1, l2 = L.split_using (as_list h00 d) n' in l1)
+    (let l1, l2 = L.split_using (as_list h00 d) n' in (n :: l2));
+  assume (g_node_vals h11 (
+      let l1, l2 = L.split_using (as_list h00 d) n' in
+      l1 `L.append` (n :: l2)) == (
+      let l1, l2 = L.splitAt (as_list h00 d `L.index_of` n') (g_node_vals h00 (as_list h00 d)) in
+      l1 `L.append` ((g_node_val h00 n) :: l2)));
+  assume (g_node_vals h11 (l_insert_after n' (as_list h00 d) n) == (
+      let l1, x :: l2 = L.splitAt (as_list h00 d `L.index_of` n') (g_node_vals h00 (as_list h00 d)) in
+      l1 `L.append` (x :: (g_node_val h00 n) :: l2)));
+  assert (g_node_vals h11 (as_list h11 d) == (
+      let l1, x :: l2 = L.splitAt (as_list h00 d `L.index_of` n') (g_node_vals h00 (as_list h00 d)) in
+      l1 `L.append` (x :: (g_node_val h00 n) :: l2)));
+  assert (as_payload_list h11 d == (
+      let l1, (x :: l2) = L.splitAt (as_list h00 d `L.index_of` n') (as_payload_list h00 d) in
+      l1 `L.append` (x :: (g_node_val h00 n) :: l2)));
+  assume (
+    let l1, (x :: l2) = L.splitAt (as_list h00 d `L.index_of` n') (as_payload_list h00 d) in
+    x == L.index (as_payload_list h00 d) (as_list h00 d `L.index_of` n'));
+  assert (as_payload_list h11 d == l_insert_after'
+            (as_list h00 d `L.index_of` n') (as_payload_list h00 d) (g_node_val h00 n));
   admit () (* Due to recent "double ghost" change *)
 
 #reset-options

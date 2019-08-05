@@ -26,14 +26,11 @@ module B = LowStar.Buffer
 (** A singular node which stores a value of type [a] *)
 val node (a:Type0) : Type0
 
+(** A [node a] that may be null *)
+val nullable_node (a:Type0) : (t:Type0{node a `subtype_of` t})
+
 (** A doublylinkedlist of elements of type [a] *)
 val dll (a:Type0) : Type0
-
-val nnode (a:Type0) : Type0
-
-val lemma_nnode_subtyping (a:Type0) :
-  Lemma
-    (node a `subtype_of` nnode a)
 
 /// Abstract Validity Predicates
 
@@ -64,6 +61,39 @@ val node_of (v:'a) :
          B.fresh_loc (fp_node n) h0 h1 /\
          node_valid h1 n /\
          v == g_node_val h1 n))
+
+/// Nullable Nodes
+
+val null_node (#a:Type0) : nullable_node a
+
+val g_is_null_node (n:nullable_node 'a) : GTot (b:bool{b <==> n == null_node})
+
+val auto_node_subtype_or_null_of_nullable_node (#a:Type0) (n:nullable_node a) :
+  Lemma
+    (ensures ((n `has_type` node a) <==> not (g_is_null_node n)))
+    [SMTPatOr [
+        [SMTPat (g_is_null_node n)];
+        [SMTPat (n `has_type` node a)]]]
+
+inline_for_extraction
+let coerce_non_null (#a:Type0) (n:nullable_node a) :
+  Pure (node a)
+    (requires (not (g_is_null_node n)))
+    (ensures (fun _ -> True)) =
+  let coerce (#b #a:Type0) (x:a) : (* XXX: Why do we need to do this double layer thing?! *)
+    Pure b
+      (requires (x `has_type` b))
+      (ensures (fun _ -> True)) = x
+  in
+  coerce n
+
+let nullable_node_valid (h:HS.mem) (n:nullable_node 'a) =
+  g_is_null_node n \/ node_valid h (coerce_non_null n)
+
+val is_null_node (n:nullable_node 'a) :
+  HST.Stack bool
+    (requires (fun h0 -> nullable_node_valid h0 n))
+    (ensures (fun h0 b h1 -> h0 == h1 /\ b == g_is_null_node n))
 
 /// Abstract Predicate to help "recall" that updating the payload
 /// leaves connections unchanged
@@ -115,28 +145,30 @@ val is_empty (d:dll 'a) :
          (y <==> as_list h0 d == [])))
 
 val dll_head (d:dll 'a) :
-  HST.StackInline (node 'a)
-    (requires (fun h0 -> dll_valid h0 d /\ L.length (as_list h0 d) > 0))
+  HST.StackInline (nullable_node 'a)
+    (requires (fun h0 -> dll_valid h0 d))
     (ensures (fun h0 n h1 ->
          B.modifies B.loc_none h0 h1 /\
          dll_valid h1 d /\
-         node_valid h1 n /\
+         nullable_node_valid h1 n /\
          as_list h0 d == as_list h1 d /\
-         n == L.hd (as_list h0 d)))
+         (g_is_null_node n == (L.length (as_list h0 d) = 0)) /\
+         (L.length (as_list h0 d) > 0 ==> coerce_non_null n == L.hd (as_list h0 d))))
 
 val dll_tail (d:dll 'a) :
-  HST.StackInline (node 'a)
-    (requires (fun h0 -> dll_valid h0 d /\ L.length (as_list h0 d) > 0))
+  HST.StackInline (nullable_node 'a)
+    (requires (fun h0 -> dll_valid h0 d))
     (ensures (fun h0 n h1 ->
          h0 == h1 /\
          dll_valid h1 d /\
-         node_valid h1 n /\
+         nullable_node_valid h1 n /\
          as_list h0 d == as_list h1 d /\
-         n == snd (L.unsnoc (as_list h0 d))))
+         (g_is_null_node n == (L.length (as_list h0 d) = 0)) /\
+         (L.length (as_list h0 d) > 0 ==> coerce_non_null n == snd (L.unsnoc (as_list h0 d)))))
 
 /// Moving forwards or backwards in a list
 
-val has_next (d:dll 'a) (n:node 'a) :
+val fast_has_next (d:dll 'a) (n:node 'a) :
   HST.StackInline bool
     (requires (fun h0 ->
          dll_valid h0 d /\
@@ -146,7 +178,7 @@ val has_next (d:dll 'a) (n:node 'a) :
          (h0 == h1) /\
          (y <==> L.index_of (as_list h0 d) n < L.length (as_list h0 d) - 1)))
 
-val has_prev (d:dll 'a) (n:node 'a) :
+val fast_has_prev (d:dll 'a) (n:node 'a) :
   HST.StackInline bool
     (requires (fun h0 ->
          dll_valid h0 d /\
@@ -156,31 +188,55 @@ val has_prev (d:dll 'a) (n:node 'a) :
          (h0 == h1) /\
          (y <==> L.index_of (as_list h0 d) n > 0)))
 
-val next_node (d:dll 'a) (n:node 'a) :
-  HST.StackInline (node 'a)
+val has_next (d:dll 'a) (n:nullable_node 'a) :
+  HST.StackInline bool
     (requires (fun h0 ->
          dll_valid h0 d /\
-         n `L.memP` as_list h0 d /\
-         L.index_of (as_list h0 d) n < L.length (as_list h0 d) - 1))
+         nullable_node_valid h0 n /\
+         (n =!= null_node ==> coerce_non_null n `L.memP` as_list h0 d)))
+    (ensures (fun h0 y h1 ->
+         (h0 == h1) /\
+         (y <==> (n =!= null_node /\
+                L.index_of (as_list h0 d) (coerce_non_null n) < L.length (as_list h0 d) - 1))))
+
+val has_prev (d:dll 'a) (n:nullable_node 'a) :
+  HST.StackInline bool
+    (requires (fun h0 ->
+         dll_valid h0 d /\
+         nullable_node_valid h0 n /\
+         (n =!= null_node ==> coerce_non_null n `L.memP` as_list h0 d)))
+    (ensures (fun h0 y h1 ->
+         (h0 == h1) /\
+         (y <==> (n =!= null_node /\
+                L.index_of (as_list h0 d) (coerce_non_null n) > 0))))
+
+val next_node (d:dll 'a) (n:node 'a) :
+  HST.StackInline (nullable_node 'a)
+    (requires (fun h0 ->
+         dll_valid h0 d /\
+         n `L.memP` as_list h0 d))
     (ensures (fun h0 n' h1 ->
          h0 == h1 /\
          dll_valid h1 d /\
          node_valid h1 n /\
          as_list h0 d == as_list h1 d /\
-         n' == L.index (as_list h0 d) (L.index_of (as_list h0 d) n + 1)))
+         (g_is_null_node n' = not (L.index_of (as_list h0 d) n < L.length (as_list h0 d) - 1)) /\
+         (n' =!= null_node ==>
+          coerce_non_null n' == L.index (as_list h0 d) (L.index_of (as_list h0 d) n + 1))))
 
 val prev_node (d:dll 'a) (n:node 'a) :
-  HST.StackInline (node 'a)
+  HST.StackInline (nullable_node 'a)
     (requires (fun h0 ->
          dll_valid h0 d /\
-         n `L.memP` as_list h0 d /\
-         L.index_of (as_list h0 d) n > 0))
+         n `L.memP` as_list h0 d))
     (ensures (fun h0 n' h1 ->
          h0 == h1 /\
          dll_valid h1 d /\
          node_valid h1 n /\
          as_list h0 d == as_list h1 d /\
-         n' == L.index (as_list h0 d) (L.index_of (as_list h0 d) n - 1)))
+         (g_is_null_node n' = not (L.index_of (as_list h0 d) n > 0)) /\
+         (n' =!= null_node ==>
+          coerce_non_null n' == L.index (as_list h0 d) (L.index_of (as_list h0 d) n - 1))))
 
 /// DoublyLinkedList operations on standard [list]s instead
 
