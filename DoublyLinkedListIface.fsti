@@ -88,6 +88,16 @@ let coerce_non_null (#a:Type0) (n:nullable_node a) :
   in
   coerce n
 
+inline_for_extraction
+let coerce_nullable (#a:Type0) (n:node a) : Tot (nullable_node a) =
+  assert (node a `subtype_of` nullable_node a);
+  let coerce (#b #a:Type0) (x:a) : (* XXX: Why do we need to do this double layer thing?! *)
+    Pure b
+      (requires (a `subtype_of` b))
+      (ensures (fun _ -> True)) = x
+  in
+  coerce n
+
 let nullable_node_valid (h:HS.mem) (n:nullable_node 'a) =
   g_is_null_node n \/ node_valid h (coerce_non_null n)
 
