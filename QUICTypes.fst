@@ -178,19 +178,20 @@ type quic_stream_fixed = {
 }
 
 type quic_stream = DLL.node quic_stream_fixed
+type quic_stream_or_null = DLL.nullable_node quic_stream_fixed
 type quic_stream_list = DLL.dll quic_stream_fixed
 
 (** Data required, in order to recover a CRYPTO frame from a lost packet *)
 noeq
 type cryptoRecoveryTracker = {
-    cryptosegment: pointer qstream_segment;
+    cryptosegment: qstream_segment;
     }
 
 (** Data required, in order to recover a stream frame from a lost packet *)
 noeq
 type streamRecoveryTracker = {
     recoverystreamID: U64.t; // the ID isn't used, but helpful for debugging
-    segment: pointer qstream_segment;
+    segment: qstream_segment;
     }
 
 (** Helper, with encoding of ACK frames *)
@@ -351,8 +352,8 @@ type packet_holder_fixed = {
 type packet_holder = DLL.node packet_holder_fixed
 type packet_holder_list = DLL.dll packet_holder_fixed
 
-type stream_holder = DLL.node (pointer quic_stream)
-type stream_holder_list = DLL.dll (pointer quic_stream)
+type stream_holder = DLL.node quic_stream
+type stream_holder_list = DLL.dll quic_stream
 
 (** A legal connection ID length *)
 type cil_t = cil:U8.t {U8.v cil = 0 || (4 <= (U8.v cil) && (U8.v cil) <= 18)}
@@ -411,7 +412,7 @@ type packet_space_state = {
   sendAckOnlyIfNeeded: bool;
 
   (** A bidirection stream of data to/from CRYPTO frames *)
-  crypto_stream: pointer quic_stream;
+  crypto_stream: quic_stream;
 }
 
 (** The mutable state related to a QUIC connection *)

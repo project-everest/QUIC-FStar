@@ -30,6 +30,8 @@ module U8 = FStar.UInt8
 module Cast = FStar.Int.Cast
 module B = LowStar.Buffer
 
+module DLL = DoublyLinkedListIface
+
 let isStreamBidi (stream:U64.t): bool
 =
   let bit = U64.(stream &^ 2UL) in
@@ -51,19 +53,19 @@ let isStreamServerInitiated (stream:U64.t): bool
   bit <> 0UL
 
 (** Determine if a stream has segments ready to send *)
-let hasMoreToSend (strm:pointer quic_stream): ST bool
+let hasMoreToSend (strm:quic_stream): ST bool
    (requires (fun _ -> true))
    (ensures (fun _ _ _ -> true))
 =
   push_frame();
   let strmm = strm_get_mutable strm in
-  let hasmore = if (is_null strmm.segments.lhead) then false else true in
+  let hasmore = if (DLL.is_null_node (DLL.dll_head strmm.segments)) then false else true in
   pop_frame();
   hasmore
 
 (** Find a quic_stream that has data ready for transmission.  May return null
     if there is no ready stream. *)
-let findReadyStream (cs:pointer connection): ST (pointer_or_null quic_stream)
+let findReadyStream (cs:pointer connection): ST (quic_stream_or_null)
    (requires (fun _ -> true))
    (ensures (fun _ _ _ -> true))
 =
@@ -71,24 +73,25 @@ let findReadyStream (cs:pointer connection): ST (pointer_or_null quic_stream)
   let csm = conn_get_mutable cs in
   let strm =
     if U64.(csm.dataSent >=^ csm.maxDataPeer) then
-      null // Not permitted to send more stream data when the connection  is at maxDataPeer
+      DLL.null_node // Not permitted to send more stream data when the connection  is at maxDataPeer
     else (
-      let head = (!*((!*cs).csm_state)).streams.lhead in
-      let pp = B.alloca head 1ul in
-      let pstrm = B.alloca null 1ul in
-      let headisnull = is_null head in
+      let lst : quic_stream_list = (!*((!*cs).csm_state)).streams in
+      let head : quic_stream_or_null = DLL.dll_head lst in
+      let pp : pointer quic_stream_or_null = B.alloca head 1ul in
+      let pstrm = B.alloca DLL.null_node 1ul in
+      let headisnull = DLL.is_null_node head in
       let pstop = B.alloca headisnull 1ul in
       let inv h = B.live h pp in
       let test (): Stack bool (requires inv) (ensures (fun _ _ -> inv)) =
         not !*pstop
       in
       let body (): Stack unit (requires inv) (ensures (fun _ _ -> inv)) =
-        let isready = hasMoreToSend !*pp in
+        let isready = hasMoreToSend (DLL.coerce_non_null !*pp) in
         if isready then (
           pstrm *= !*pp
           );
-        pp *= (!*(!*pp)).flink;
-        pstop *= ((is_null !*pp) || isready)
+        pp *= DLL.next_node lst (DLL.coerce_non_null !*pp);
+        pstop *= ((DLL.is_null_node !*pp) || isready)
       in
       C.Loops.while test body;
       !*pstrm
@@ -127,12 +130,12 @@ let connectionHasMoreToSend (cs:pointer connection): ST (option packet_space)
           Some HandshakeSpace
         ) else if epochIndex = epochIndex1RTT then (
           let pssApplication = getPacketSpaceState cs ApplicationSpace in
-          let fixedframeListEmpty = is_null csm.fixedframes.lhead in
+          let fixedframeListEmpty = DLL.is_null_node (DLL.dll_head csm.fixedframes) in
           let hasMore = csm.pingPending ||
                         not fixedframeListEmpty ||
                         hasMoreToSend pssApplication.crypto_stream ||
                         (pssApplication.sendAckOnlyIfNeeded && pssApplication.outgoingAckCount <> 0ul) ||
-                        not (is_null (findReadyStream cs)) in
+                        not (DLL.is_null_node (findReadyStream cs)) in
           if hasMore then Some ApplicationSpace else None
         ) else
           None
@@ -154,10 +157,10 @@ let enqueueFixedFrame (cs:pointer connection) (data:buffer_t) (len:U32.t): ST in
   push_frame();
   let hWait = createEvent 0l 0l in
   let fixed = { hWait = hWait; framedata = data; framelength = len; } in
-  let pff = B.malloc HyperStack.root (empty_entry fixed) 1ul in
+  let pff = DLL.node_of HyperStack.root fixed in
   let csm = conn_get_mutable cs in
-  let list = insertTailList csm.fixedframes pff in
-  upd_fixedframes (!*cs).csm_state list;
+  DLL.dll_insert_at_tail csm.fixedframes pff;
+  upd_fixedframes (!*cs).csm_state csm.fixedframes;
   pop_frame();
   hWait
 
@@ -168,10 +171,10 @@ let enqueueAsyncFixedFrame (cs:pointer connection) (data:buffer_t) (len:U32.t): 
 =
   push_frame();
   let fixed = { hWait = nullptr; framedata = data; framelength = len; } in
-  let pff = B.malloc HyperStack.root (empty_entry fixed) 1ul in
+  let pff = DLL.node_of HyperStack.root fixed in
   let csm = conn_get_mutable cs in
-  let list = insertTailList csm.fixedframes pff in
-  upd_fixedframes (!*cs).csm_state list;
+  DLL.dll_insert_at_tail csm.fixedframes pff;
+  upd_fixedframes (!*cs).csm_state csm.fixedframes;
   pop_frame()
 
 (** Add the connection to the engine's ready-to-send list *)
@@ -181,10 +184,10 @@ let setHasReadyToSend (cs:pointer connection): ST unit
 =
   push_frame();
   let eng = from_engine_t (!*cs).eng in
-  let pholder = B.malloc HyperStack.root (empty_entry cs) 1ul in
+  let pholder = DLL.node_of HyperStack.root cs in
   monitorEnter (!*eng).emonitor;
-  let list = insertTailList (!*eng).readyconnections pholder in
-  upd_readyconnections eng list;
+  DLL.dll_insert_at_tail (!*eng).readyconnections pholder;
+  upd_readyconnections eng (!*eng).readyconnections;
   setEvent (!*eng).dataReadyToSend;
   monitorExit (!*eng).emonitor;
   pop_frame()
@@ -224,24 +227,24 @@ let abortConnection (cs:pointer connection) (transportErrorCode:U16.t): ST unit
   pop_frame()
 
 (** Find a stream within the connection, by its ID *)
-let findStream (csm:connection_mutable) (stream:U64.t): ST (pointer_or_null quic_stream)
+let findStream (csm:connection_mutable) (stream:U64.t): ST (quic_stream_or_null)
    (requires (fun _ -> true))
    (ensures (fun _ _ _ -> true))
 =
   push_frame();
-  let head = csm.streams.lhead in
-  let pp = B.alloca head 1ul in
-  let pstrm = B.alloca null 1ul in
+  let head = DLL.dll_head csm.streams in
+  let pp : pointer quic_stream_or_null = B.alloca head 1ul in
+  let pstrm = B.alloca DLL.null_node 1ul in
   let inv h = B.live h pp in
   let test (): Stack bool (requires inv) (ensures (fun _ _ -> inv)) =
-    not (is_null !*pp)
+    not (DLL.is_null_node !*pp)
   in
   let body (): Stack unit (requires inv) (ensures (fun _ _ -> inv)) =
-    if (!*(!*pp)).p.streamID = stream then (
+    if (DLL.node_val (DLL.coerce_non_null !*pp)).streamID = stream then (
       pstrm *= !*pp;
-      pp *= null
+      pp *= DLL.null_node
     ) else (
-      pp *= (!*(!*pp)).flink
+      pp *= DLL.next_node csm.streams (DLL.coerce_non_null !*pp)
     )
   in
   C.Loops.while test body;
@@ -250,7 +253,7 @@ let findStream (csm:connection_mutable) (stream:U64.t): ST (pointer_or_null quic
   strm
 
 (** Free the memory associated with a segment *)
-let deleteSegment (seg:pointer qstream_segment): ST unit
+let deleteSegment (seg:qstream_segment): ST unit
    (requires (fun _ -> true))
    (ensures (fun _ _ _ -> true))
 =
@@ -258,46 +261,48 @@ let deleteSegment (seg:pointer qstream_segment): ST unit
     (* Quick check that the segment is not live.  This isn't sufficient, as a list with
        exactly one element won't trigger this check, as the one element's
        flink and blink are both null *)
-    if not (is_null (!*seg).flink) || not (is_null (!*seg).blink)
-        then failwith (of_literal "deleteSegment of a segment still on a list");
+    (* JB: We won't require this check anymore once we have proven
+           memory safety; thus I haven't bothered converting this part
+           over. *)
+    // if not (is_null (!*seg).flink) || not (is_null (!*seg).blink)
+    //     then failwith (of_literal "deleteSegment of a segment still on a list");
 
-    if not (!*seg).p.isApplicationOwned then B.free (!*seg).p.data;
-    let h = (!*seg).p.available in
+    if not (DLL.node_val seg).isApplicationOwned then B.free (DLL.node_val seg).data;
+    let h = (DLL.node_val seg).available in
     if h <> (uint32_to_intptr_t 0ul) then closeHandle h;
-    B.free seg;
+    (* FIXME[jb]: We don't (yet) support free in the dlist interface *)
+    // B.free seg;
     pop_frame()
 
 (** Create a new stream instance *)
-let createStream (stream:U64.t) (maxData:U64.t) : ST (pointer quic_stream)
+let createStream (stream:U64.t) (maxData:U64.t) : ST (quic_stream)
    (requires (fun _ -> true))
    (ensures (fun _ _ _ -> true))
 =
   push_frame();
-  let pstrm =
-    let strmm:quic_stream_mutable = {
-      recvState = RecvStreamRecv;
-      partialsegments=empty_list;
-      readysegments=empty_list;
-      nextReadOffset = 0UL;
-      error_code=0us;
+  let strmm:quic_stream_mutable = {
+    recvState = RecvStreamRecv;
+    partialsegments=DLL.dll_new HyperStack.root;
+    readysegments=DLL.dll_new HyperStack.root;
+    nextReadOffset = 0UL;
+    error_code=0us;
 
-      sendState = SendStreamSend;
-      nextWriteOffset = 0UL;
-      maxStreamData = maxData;
-      segments=empty_list;
-      } in
-    let strmr = B.malloc HyperStack.root strmm 1ul in
-    let strmf:quic_stream_fixed = {
-      streamID = stream;
-      qsm_state = strmr;
+    sendState = SendStreamSend;
+    nextWriteOffset = 0UL;
+    maxStreamData = maxData;
+    segments=DLL.dll_new HyperStack.root;
     } in
-    let strm = empty_entry strmf in
-    B.malloc HyperStack.root strm 1ul in
+  let strmr = B.malloc HyperStack.root strmm 1ul in
+  let strmf:quic_stream_fixed = {
+    streamID = stream;
+    qsm_state = strmr;
+  } in
+  let strm = DLL.node_of HyperStack.root strmf in
   pop_frame();
-  pstrm
+  strm
 
 (** Open a QUIC stream.  Called from quic_OpenStream() as well as from the frame-recieve path *)
-let openStreamInternal (cs:pointer connection) (stream:U64.t) : ST (pointer_or_null quic_stream)
+let openStreamInternal (cs:pointer connection) (stream:U64.t) : ST (quic_stream_or_null)
    (requires (fun _ -> true))
    (ensures (fun _ _ _ -> true))
 =
@@ -307,15 +312,15 @@ let openStreamInternal (cs:pointer connection) (stream:U64.t) : ST (pointer_or_n
       let csm = conn_get_mutable cs in
       let strm = findStream csm stream in
       let strm =
-        if is_null strm then (
+        if DLL.is_null_node strm then (
           let maxStreamID = if (isStreamBidi stream) then csm.maxStreamID_BIDIPeer else csm.maxStreamID_UNIPeer in
           if U64.gt stream maxStreamID then
-            null
+            DLL.null_node
           else (
             let pstrm = createStream stream csm.defaultMaxStreamData in
-            let list = insertTailList csm.streams pstrm in
-            upd_streams (!*cs).csm_state list;
-            pstrm
+            DLL.dll_insert_at_tail csm.streams pstrm;
+            upd_streams (!*cs).csm_state csm.streams;
+            DLL.coerce_nullable pstrm
           )
         ) else (
           strm
@@ -328,29 +333,29 @@ let openStreamInternal (cs:pointer connection) (stream:U64.t) : ST (pointer_or_n
 
 
 (** Public API: Open a QUIC stream.  Returns NULL on failure. *)
-let quic_OpenStream (cs:pointer connection) (stream:U64.t) : ST (pointer_or_null quic_stream)
+let quic_OpenStream (cs:pointer connection) (stream:U64.t) : ST (quic_stream_or_null)
    (requires (fun _ -> true))
    (ensures (fun _ _ _ -> true))
 =
   push_frame();
   let strm =
     if U64.(stream >^ 0x3fffffffffffffffUL) then (* Invalid stream ID.  Must be less than 2^62 *)
-      null
+      DLL.null_node
     else
       openStreamInternal cs stream
     in
   pop_frame();
   strm
-  
+
 (* Send data on a stream, without blocking until the data is actually sent.  Returns a waitable HANDLE. *)
-let sendStreamNonBlocking (cs:pointer connection) (strm: pointer quic_stream) (data:buffer_t) (datalength:U32.t) (fin:bool) : ST intptr_t
+let sendStreamNonBlocking (cs:pointer connection) (strm: quic_stream) (data:buffer_t) (datalength:U32.t) (fin:bool) : ST intptr_t
    (requires (fun _ -> true))
    (ensures (fun _ _ _ -> true))
 =
   push_frame();
   monitorEnter (!*cs).monitor;
   let strmm = strm_get_mutable strm in
-  let ret = 
+  let ret =
       if strmm.sendState <> SendStreamSend then (
         print_string "Stream is not in a state where more data can be sent\n";
         nullptr
@@ -360,19 +365,18 @@ let sendStreamNonBlocking (cs:pointer connection) (strm: pointer quic_stream) (d
             offset = strmm.nextWriteOffset;
             data = data;
             datalength = datalength;
-	    isApplicationOwned = true;
+            isApplicationOwned = true;
             fin = fin;
             available = createEvent 0l 0l;
             } in
-          let lseg:qstream_segment = empty_entry seg in
-          let pseg = B.malloc HyperStack.root lseg 1ul in
-          let list = insertTailList strmm.segments pseg in
-          upd_segments (!*strm).p.qsm_state list;
+          let pseg:qstream_segment = DLL.node_of HyperStack.root seg in
+          DLL.dll_insert_at_tail strmm.segments pseg;
+          upd_segments (DLL.node_val strm).qsm_state strmm.segments;
           let datalength64 = Cast.uint32_to_uint64 datalength in
-          upd_nextWriteOffset (!*strm).p.qsm_state U64.(strmm.nextWriteOffset +^ datalength64);
+          upd_nextWriteOffset (DLL.node_val strm).qsm_state U64.(strmm.nextWriteOffset +^ datalength64);
           setHasReadyToSend cs;
           if fin then
-            upd_sendstate (!*strm).p.qsm_state SendStreamDataSent;
+            upd_sendstate (DLL.node_val strm).qsm_state SendStreamDataSent;
           monitorExit (!*cs).monitor;
           seg.available
         ) in
@@ -380,53 +384,51 @@ let sendStreamNonBlocking (cs:pointer connection) (strm: pointer quic_stream) (d
   ret
 
 (** Place a segment at the head of the list of segments to send *)
-let putSegmentAtHead (strm:pointer quic_stream) (segment:pointer qstream_segment): ST unit
+let putSegmentAtHead (strm:quic_stream) (segment:qstream_segment): ST unit
    (requires (fun _ -> true))
    (ensures (fun _ _ _ -> true))
 =
   push_frame();
   let strmm = strm_get_mutable strm in
-  let list = insertHeadList strmm.segments segment in
-  upd_segments (!*strm).p.qsm_state list;
+  DLL.dll_insert_at_head strmm.segments segment;
+  upd_segments (DLL.node_val strm).qsm_state strmm.segments;
   pop_frame()
 
 (** Split a segment in two, at offset 'offset'.  Return the first
     segment, and push the second back into the stream as the head *)
-let splitSegmentAtOffset (strm:pointer quic_stream) (segment:pointer qstream_segment) (offset:U32.t): ST (pointer qstream_segment)
+let splitSegmentAtOffset (strm:quic_stream) (segment:qstream_segment) (offset:U32.t): ST (qstream_segment)
    (requires (fun _ -> true))
    (ensures (fun _ _ _ -> true))
 =
   push_frame();
   let offset64 = Cast.uint32_to_uint64 offset in
-  let data=(!*segment).p.data in
+  let data=(DLL.node_val segment).data in
   let firstseg = {
-    offset=(!*segment).p.offset;
+    offset=(DLL.node_val segment).offset;
     data=data;
     datalength=offset;
-    isApplicationOwned = (!*segment).p.isApplicationOwned;
+    isApplicationOwned = (DLL.node_val segment).isApplicationOwned;
     fin=false;
-    available=(!*segment).p.available;
+    available=(DLL.node_val segment).available;
   } in
   let data = B.offset data offset in
   let secondseg = {
-    offset=U64.((!*segment).p.offset+^offset64);
+    offset=U64.((DLL.node_val segment).offset+^offset64);
     data=data;
-    datalength=U32.( (!*segment).p.datalength-^offset);
-    isApplicationOwned = (!*segment).p.isApplicationOwned;
-    fin=(!*segment).p.fin;
-    available=(!*segment).p.available;
+    datalength=U32.( (DLL.node_val segment).datalength-^offset);
+    isApplicationOwned = (DLL.node_val segment).isApplicationOwned;
+    fin=(DLL.node_val segment).fin;
+    available=(DLL.node_val segment).available;
   } in
-  let lfirstseg:qstream_segment = empty_entry firstseg in
-  let lsecondseg:qstream_segment = empty_entry secondseg in
-  let pfirstseg = B.malloc HyperStack.root lfirstseg 1ul in
-  let psecondseg = B.malloc HyperStack.root lsecondseg 1ul in
+  let pfirstseg = DLL.node_of HyperStack.root firstseg in
+  let psecondseg = DLL.node_of HyperStack.root secondseg in
   let strmm = strm_get_mutable strm in
-  let list = insertHeadList strmm.segments psecondseg in
-  upd_segments (!*strm).p.qsm_state list;
+  DLL.dll_insert_at_head strmm.segments psecondseg;
+  upd_segments (DLL.node_val strm).qsm_state strmm.segments;
   pop_frame();
   pfirstseg
 
-let sendStream (cs:pointer connection) (strm: pointer quic_stream) (data:buffer_t) (datalength:U32.t) (fin:bool) : ST unit
+let sendStream (cs:pointer connection) (strm: quic_stream) (data:buffer_t) (datalength:U32.t) (fin:bool) : ST unit
    (requires (fun _ -> true))
    (ensures (fun _ _ _ -> true))
 =
@@ -436,12 +438,12 @@ let sendStream (cs:pointer connection) (strm: pointer quic_stream) (data:buffer_
 
 (* Public API: Send data on a stream.  This blocks until the data has been sent and ACK'd,
     then returns.  The caller is then able to free the data buffer. *)
-let quic_SendStream (cs:pointer connection) (strm: pointer quic_stream) (data:buffer_t) (datalength:U32.t) (fin:bool) : ST (err bool)
+let quic_SendStream (cs:pointer connection) (strm: quic_stream) (data:buffer_t) (datalength:U32.t) (fin:bool) : ST (err bool)
    (requires (fun _ -> true))
    (ensures (fun _ _ _ -> true))
 =
   // Validate that the stream ID is either bidi or uni and we are the client
-  let id = (!*strm).p.streamID in
+  let id = (DLL.node_val strm).streamID in
   let isBidi = isStreamBidi id in
   let isCorrectDirection = (isStreamClientInitiated id) = (!*cs).is_client in
   if isBidi || isCorrectDirection then (
@@ -452,16 +454,16 @@ let quic_SendStream (cs:pointer connection) (strm: pointer quic_stream) (data:bu
   )
 
 (** Public API: Close a stream *)
-let quic_CloseStream (cs:pointer connection) (strm:pointer quic_stream): ST unit
+let quic_CloseStream (cs:pointer connection) (strm:quic_stream): ST unit
    (requires (fun _ -> true))
    (ensures (fun _ _ _ -> true))
 =
   push_frame();
   monitorEnter (!*cs).monitor;
   let strmm = strm_get_mutable strm in
-  upd_recvstate (!*strm).p.qsm_state RecvStreamResetRead;
-  upd_sendstate (!*strm).p.qsm_state SendStreamResetRecvd;
-  upd_error_code (!*strm).p.qsm_state 0us;
+  upd_recvstate (DLL.node_val strm).qsm_state RecvStreamResetRead;
+  upd_sendstate (DLL.node_val strm).qsm_state SendStreamResetRecvd;
+  upd_error_code (DLL.node_val strm).qsm_state 0us;
   monitorExit (!*cs).monitor;
   pop_frame()
 
@@ -501,16 +503,16 @@ let packetSpaceFromEpoch (epoch:epoch) : ST packet_space
   | Epoch1RTT -> ApplicationSpace
 
 (** data has arrived in a CRYPTO frame.  Forward it to miTLS *)
-let processCryptoSegment (cs:pointer connection) (seg:pointer qstream_segment): ST unit
+let processCryptoSegment (cs:pointer connection) (seg:qstream_segment): ST unit
    (requires (fun _ -> true))
    (ensures (fun _ _ _ -> true))
 =
   push_frame();
   print_string "processCryptoSegment ENTER\n";
-  
+
   // Mutable variables for the do/while loop
-  let inbuf_cur = B.alloca (!*seg).p.data 1ul in
-  let inbuf_cur_length = B.alloca (!*seg).p.datalength 1ul in
+  let inbuf_cur = B.alloca (DLL.node_val seg).data 1ul in
+  let inbuf_cur_length = B.alloca (DLL.node_val seg).datalength 1ul in
   C.Loops.do_while
       (fun h break -> live h inbuf_cur /\ (break ==> False))
       (fun _ ->
@@ -534,7 +536,7 @@ let processCryptoSegment (cs:pointer connection) (seg:pointer qstream_segment): 
         print_string "  ffi_mitls_quic_process\n";
         let result = ffi_mitls_quic_process (csm.mitls_state) pctx in
         if result = 0l then failwith (of_literal "FFI_mitls_quic_process failed");
-        
+
         let new_output_len = intptr_t_to_uint32 (!*pctx).output_len in
         if new_output_len = 0ul then (
           print_string "  No new output data\n";
@@ -607,48 +609,47 @@ let processCryptoSegment (cs:pointer connection) (seg:pointer qstream_segment): 
           //ffi_mitls_quic_free csm.mitls_state;
           //upd_mitls_state (!*cs).csm_state (uint32_to_intptr_t 0ul)
         );
-        finished               
+        finished
         );
   print_string "processCryptoSegment EXIT\n";
   pop_frame()
 
 (** data has arrived in a CRYPTO frame.  Forward it to miTLS *)
-let processCrypto (cs:pointer connection) (strm:pointer quic_stream): ST unit
+let processCrypto (cs:pointer connection) (strm:quic_stream): ST unit
    (requires (fun _ -> true))
    (ensures (fun _ _ _ -> true))
 =
   push_frame();
   let strmm=strm_get_mutable strm in
-  let seg = strmm.readysegments.lhead in
+  let seg = DLL.dll_head strmm.readysegments in
   // remove seg from the head of the list
-  let list = removeEntryList strmm.readysegments seg in
-  upd_readysegments (!*strm).p.qsm_state list;
-  processCryptoSegment cs seg;
-  deleteSegment seg;
+  DLL.dll_remove_head strmm.readysegments;
+  upd_readysegments (DLL.node_val strm).qsm_state strmm.readysegments;
+  processCryptoSegment cs (DLL.coerce_non_null seg);
+  deleteSegment (DLL.coerce_non_null seg);
   pop_frame()
 
 (** Indicate new data is ready for the application to receive on a stream *)
-let makeStreamDataAvailable (cs:pointer connection) (ps:packet_space) (strm:pointer quic_stream) (seg:pointer qstream_segment): ST unit
+let makeStreamDataAvailable (cs:pointer connection) (ps:packet_space) (strm:quic_stream) (seg:qstream_segment): ST unit
    (requires (fun _ -> true))
    (ensures (fun _ _ _ -> true))
 =
   push_frame();
   let strmm=strm_get_mutable strm in
-  let datalength = (!*seg).p.datalength in
+  let datalength = (DLL.node_val seg).datalength in
   let datalength64 = Cast.uint32_to_uint64 datalength in
   let nextReadOffset = U64.(strmm.nextReadOffset +^ datalength64) in
-  upd_nextReadOffset (!*strm).p.qsm_state nextReadOffset;
-  let list = insertTailList strmm.readysegments seg in
-  upd_readysegments (!*strm).p.qsm_state list;
+  upd_nextReadOffset (DLL.node_val strm).qsm_state nextReadOffset;
+  DLL.dll_insert_at_tail strmm.readysegments seg;
+  upd_readysegments (DLL.node_val strm).qsm_state strmm.readysegments;
   let pss = getPacketSpaceState cs ps in
   if strm = pss.crypto_stream then (
     processCrypto cs strm
   ) else (
     let csm = conn_get_mutable cs in
-    let holder = empty_entry strm in
-    let pholder = B.malloc HyperStack.root holder 1ul in
-    let list = insertTailList csm.readystreams pholder in
-    upd_readystreams (!*cs).csm_state list;
+    let pholder = DLL.node_of HyperStack.root strm in
+    DLL.dll_insert_at_tail csm.readystreams pholder;
+    upd_readystreams (!*cs).csm_state csm.readystreams;
     setEvent (!*cs).streamDataAvailable
   );
   pop_frame()
@@ -675,46 +676,48 @@ let recvStream (cs:pointer connection)  : ST stream_recv
    (ensures (fun _ _ _ -> true))
 =
   let csm = conn_get_mutable cs in
-  let strmholder = csm.readystreams.lhead in
-  let list = removeEntryList csm.readystreams strmholder in
-  let strm = (!*strmholder).p in
-  B.free strmholder;
-  upd_readystreams (!*cs).csm_state list;
-  if is_null list.lhead then // list is empty
+  let strmholder = DLL.dll_head csm.readystreams in
+  DLL.dll_remove_head csm.readystreams;
+  let strm = (DLL.node_val (DLL.coerce_non_null strmholder)) in
+  (* FIXME[jb]: We don't support freeing in the dlist iface yet *)
+  // B.free strmholder;
+  upd_readystreams (!*cs).csm_state csm.readystreams;
+  if DLL.is_empty csm.readystreams then
     resetEvent (!*cs).streamDataAvailable;
 
   let strmm = strm_get_mutable strm in
   let ret = if strmm.recvState = RecvStreamResetRecvd then (
-     upd_recvstate  (!*strm).p.qsm_state RecvStreamResetRead;
-     let r = {  rst_stream_id = (!*strm).p.streamID; rst_error_code = strmm.error_code;  } in
+     upd_recvstate  (DLL.node_val strm).qsm_state RecvStreamResetRead;
+     let r = {  rst_stream_id = (DLL.node_val strm).streamID; rst_error_code = strmm.error_code;  } in
      Reset r
   ) else (
       // Get the first ready segment
-      let seg = strmm.readysegments.lhead in
+      let seg = DLL.dll_head strmm.readysegments in
       // remove seg from the head of the list
-      let list = removeEntryList strmm.readysegments seg in
-      upd_readysegments (!*strm).p.qsm_state list;
-      if (!*seg).p.fin then (
-        upd_recvstate (!*strm).p.qsm_state RecvStreamDataRead
+      DLL.dll_remove_head strmm.readysegments;
+      upd_readysegments (DLL.node_val strm).qsm_state strmm.readysegments;
+      if (DLL.node_val (DLL.coerce_non_null seg)).fin then (
+        upd_recvstate (DLL.node_val strm).qsm_state RecvStreamDataRead
       );
       // check if the next partial segment is ready for next recv
-      let nextseg = strmm.partialsegments.lhead in
-      if not (is_null nextseg) then (
+      let nextseg = DLL.dll_head strmm.partialsegments in
+      if not (DLL.is_null_node nextseg) then (
         print_string "Next segment is present\n";
-        if (!*nextseg).p.offset = strmm.nextReadOffset then (
-          let list = removeEntryList strmm.partialsegments nextseg in
-          upd_partialsegments (!*strm).p.qsm_state list;
+        if (DLL.node_val (DLL.coerce_non_null nextseg)).offset = strmm.nextReadOffset then (
+          DLL.dll_remove_mid strmm.partialsegments (DLL.coerce_non_null nextseg);
+          upd_partialsegments (DLL.node_val strm).qsm_state strmm.partialsegments;
           print_string "Making next segment available\n";
-          makeStreamDataAvailable cs ApplicationSpace strm nextseg
+          makeStreamDataAvailable cs ApplicationSpace strm (DLL.coerce_non_null nextseg)
         )
       );
       monitorExit (!*cs).monitor;
       let ret = {
-        stream_id = (!*strm).p.streamID;
-        recv_data = (!*seg).p.data;
-        recv_len =  (!*seg).p.datalength;
+        stream_id = (DLL.node_val strm).streamID;
+        recv_data = (DLL.node_val (DLL.coerce_non_null seg)).data;
+        recv_len =  (DLL.node_val (DLL.coerce_non_null seg)).datalength;
       } in
-      B.free seg; (* Don't call deleteSegment here, as it would free the data that we are returning *)
+      (* FIXME[jb]: We don't support freeing in dlist iface yet. *)
+      // B.free seg; (* Don't call deleteSegment here, as it would free the data that we are returning *)
       ReceivedData ret
   ) in
   ret
@@ -727,7 +730,7 @@ let quic_RecvStream (cs:pointer connection) : ST stream_recv
 =
   push_frame();
   waitForSingleObject (!*cs).streamDataAvailable 0xfffffffful;
-  
+
   monitorEnter (!*cs).monitor;
   // Get the first ready stream
   let csm = conn_get_mutable cs in
@@ -739,7 +742,7 @@ let quic_RecvStream (cs:pointer connection) : ST stream_recv
   ret
 
 (** Public API:  Query if the 'fin' marker has been received, for end of the stream *)
-let quic_StreamIsFin (cs:pointer connection) (strm:pointer quic_stream): ST bool
+let quic_StreamIsFin (cs:pointer connection) (strm:quic_stream): ST bool
    (requires (fun _ -> true))
    (ensures (fun _ _ _ -> true))
 =
@@ -752,83 +755,82 @@ let quic_StreamIsFin (cs:pointer connection) (strm:pointer quic_stream): ST bool
   result
 
 (** Retrieve the next stream segment from .segments, ready to send *)
-let getNextSegment (strm:pointer quic_stream): ST (pointer qstream_segment)
+let getNextSegment (strm:quic_stream): ST (qstream_segment)
    (requires (fun _ -> true))
    (ensures (fun _ _ _ -> true))
 =
   push_frame();
   let strmm = strm_get_mutable strm in
-  let seg = strmm.segments.lhead in
+  let seg = DLL.dll_head strmm.segments in
   // Remove from head of the list
-  let list = removeEntryList strmm.segments seg in
-  upd_segments (!*strm).p.qsm_state list;
+  DLL.dll_remove_head strmm.segments;
+  upd_segments (DLL.node_val strm).qsm_state strmm.segments;
   pop_frame();
-  seg
+  DLL.coerce_non_null seg
 
 (** Merge a newly-arrived segment into the current segment list.  This must handle overlapping
     and duplicated segments arriving out of order. *)
-let splitSegment (seg:pointer qstream_segment) (firstlength:U32.t): ST ((pointer qstream_segment) * (pointer qstream_segment))
+let splitSegment (seg:qstream_segment) (firstlength:U32.t): ST ((qstream_segment) * (qstream_segment))
    (requires (fun _ -> true))
    (ensures (fun _ _ _ -> true))
 =
   push_frame();
-  let data = (!*seg).p.data in
+  let data = (DLL.node_val seg).data in
   let firstdata = B.malloc HyperStack.root 0uy firstlength in
   B.blit data 0ul firstdata 0ul firstlength;
-  let seconddatalength = U32.((!*seg).p.datalength -^ firstlength) in
+  let seconddatalength = U32.((DLL.node_val seg).datalength -^ firstlength) in
   let seconddata = B.malloc HyperStack.root 0uy seconddatalength in
   B.blit data firstlength seconddata 0ul seconddatalength;
   let first:qstream_segment_fixed = {
-    offset = (!*seg).p.offset;
+    offset = (DLL.node_val seg).offset;
     data = firstdata;
     datalength = firstlength;
     isApplicationOwned = false;
     fin = false;
     available = createEvent 0l 0l;
   } in
-  let first = empty_entry first in
   let firstlength64 = Cast.uint32_to_uint64 firstlength in
-  let secondoffset = U64.(first.p.offset +^ firstlength64) in
+  let secondoffset = U64.(first.offset +^ firstlength64) in
   let second:qstream_segment_fixed = {
     offset = secondoffset;
     data = seconddata;
     datalength = seconddatalength;
     isApplicationOwned = false;
-    fin = (!*seg).p.fin;
+    fin = (DLL.node_val seg).fin;
     available = createEvent 0l 0l;
   } in
-  let second = empty_entry second in
-  let pfirst = B.malloc HyperStack.root first 1ul in
-  let psecond = B.malloc HyperStack.root second 1ul in
+  let pfirst = DLL.node_of HyperStack.root first in
+  let psecond = DLL.node_of HyperStack.root second in
   deleteSegment seg;
   pop_frame();
   (pfirst, psecond)
 
 (** Compute the end of a segment (offset+datalength) *)
-let segmentEnd (seg:pointer qstream_segment) : ST U64.t
+let segmentEnd (seg:qstream_segment) : ST U64.t
    (requires (fun _ -> true))
    (ensures (fun _ _ _ -> true))
 =
   push_frame();
-  let offset = (!*seg).p.offset in
-  let length = (!*seg).p.datalength in
+  let offset = (DLL.node_val seg).offset in
+  let length = (DLL.node_val seg).datalength in
   let segend = U64.(offset +^ (Cast.uint32_to_uint64 length)) in
   pop_frame();
   segend
 
-let verifyDataReceivedSize (cs:pointer connection) (seg:pointer qstream_segment): ST bool
+let verifyDataReceivedSize (cs:pointer connection) (seg:qstream_segment): ST bool
    (requires (fun _ -> true))
    (ensures (fun _ _ _ -> true))
 =
   push_frame();
   let csm = conn_get_mutable cs in
-  let datalength32 = (!*seg).p.datalength in
+  let datalength32 = (DLL.node_val seg).datalength in
   let datalength = Cast.uint32_to_uint64 datalength32 in
   let newDataReceived = U64.( csm.dataReceived +^ datalength) in
   let ret =
     if U64.(newDataReceived >^ csm.maxDataLocal) then (
-      B.free (!*seg).p.data;
-      B.free seg;
+      B.free (DLL.node_val seg).data;
+      (* FIXME[jb]: We don't support freeing in dlist iface yet *)
+      // B.free seg;
       abortConnection cs 0x3us;  // abort with FLOW_CONTROL_ERROR
       false
     ) else (
@@ -839,30 +841,30 @@ let verifyDataReceivedSize (cs:pointer connection) (seg:pointer qstream_segment)
   ret
 
 (** Body of the do/while loop.  Returns the new list, and true to keep iterating, or false to stop *)
-let mergeSegmentsBody (cs:pointer connection) (partialsegments: qstream_segment_list) (c:pointer qstream_segment) (seg:pointer qstream_segment) : ST (qstream_segment_list * bool)
+let mergeSegmentsBody (cs:pointer connection) (partialsegments: qstream_segment_list) (c:qstream_segment) (seg:qstream_segment) : ST (qstream_segment_list * bool)
    (requires (fun _ -> true))
    (ensures (fun _ _ _ -> true))
 =
   push_frame();
-  let c_offset = (!*c).p.offset in
-  let seg_offset = (!*seg).p.offset in
+  let c_offset = (DLL.node_val c).offset in
+  let seg_offset = (DLL.node_val seg).offset in
   let c_segmentend = segmentEnd c in
   let seg_segmentend = segmentEnd seg in
   let ret =
-    if (U64.lt c_segmentend c_offset) && (c=partialsegments.lhead) then (
+    if (U64.lt c_segmentend c_offset) && (not (DLL.fast_has_prev partialsegments c)) then (
       // seg fits before the first element with no overlap.  Insert it.
       if verifyDataReceivedSize cs seg then (
-        let partialsegments = insertEntryBefore partialsegments c seg in
+        DLL.dll_insert_before c partialsegments seg;
         (partialsegments,false) // done
       ) else (
         (partialsegments,false) // done
       )
     ) else if U64.gte seg_offset c_segmentend then (
       // seg goes after current
-      if c = partialsegments.ltail then (
+      if not (DLL.fast_has_next partialsegments c) then (
         // at the end of the list.  Add to the end.
         if verifyDataReceivedSize cs seg then (
-          let partialsegments = insertTailList partialsegments seg in
+          DLL.dll_insert_at_tail partialsegments seg;
           (partialsegments, false) // done
         ) else (
           (partialsegments, false) // done
@@ -877,7 +879,7 @@ let mergeSegmentsBody (cs:pointer connection) (partialsegments: qstream_segment_
     ) else if (U64.lt seg_offset c_offset) && (seg_segmentend = c_offset) then (
       // seg is adjacent to c
       if verifyDataReceivedSize cs seg then (
-        let partialsegments = insertEntryBefore partialsegments c seg in
+        DLL.dll_insert_before c partialsegments seg;
         (partialsegments, false) // done
       ) else (
         (partialsegments, false) // done
@@ -888,7 +890,7 @@ let mergeSegmentsBody (cs:pointer connection) (partialsegments: qstream_segment_
       let l32 = Cast.uint64_to_uint32 l in
       let f,_ = splitSegment seg l32 in
       if verifyDataReceivedSize cs seg then (
-        let partialsegments = insertEntryBefore partialsegments c f in
+        DLL.dll_insert_before c partialsegments f;
         (partialsegments, false) // done
       ) else (
         (partialsegments, false) // done
@@ -899,14 +901,14 @@ let mergeSegmentsBody (cs:pointer connection) (partialsegments: qstream_segment_
     in
   pop_frame();
   ret
-  
+
 (** Search inside the partialsegments list...
   if seg is entirely in a gap, insert it
   if seg overlaps with another...
     if it is exactly overlapping, drop it
     if it overlaps from the front, insert before, after truncting seg
     if it overlaps from the rear, insert after, after pruning off the start *)
-let mergeSegments (cs:pointer connection) (strm:pointer quic_stream) (seg:pointer qstream_segment): ST unit
+let mergeSegments (cs:pointer connection) (strm:quic_stream) (seg:qstream_segment): ST unit
    (requires (fun _ -> true))
    (ensures (fun _ _ _ -> true))
 =
@@ -914,28 +916,28 @@ let mergeSegments (cs:pointer connection) (strm:pointer quic_stream) (seg:pointe
   let strmm = strm_get_mutable strm in
   let list = strmm.partialsegments in
   let list =
-    if is_null list.lhead then (
+    if DLL.is_empty list then (
       // first segment in list
       if verifyDataReceivedSize cs seg then
-        insertHeadList list seg
+        (DLL.dll_insert_at_head list seg; list)
       else
         list
     ) else (
-      let lv = list.ltail in // last value
-      if U64.gte (!*seg).p.offset (segmentEnd lv) then (
+      let lv = DLL.coerce_non_null (DLL.dll_tail list) in // last value
+      if U64.gte (DLL.node_val seg).offset (segmentEnd lv) then (
         // segment appends to the end of the list
         if verifyDataReceivedSize cs seg then
-          insertTailList list seg
+          (DLL.dll_insert_at_tail list seg; list)
         else
           list
-      ) else if U64.gte (!*seg).p.offset (!*lv).p.offset then (
+      ) else if U64.gte (DLL.node_val seg).offset (DLL.node_val lv).offset then (
         // segment overlaps with the end of the list
-        let l64 = U64.((segmentEnd lv) -^ (!*seg).p.offset) in
+        let l64 = U64.((segmentEnd lv) -^ (DLL.node_val seg).offset) in
         let l = Cast.uint64_to_uint32 l64 in
-        if U32.lt l (!*seg).p.datalength then (
+        if U32.lt l (DLL.node_val seg).datalength then (
           let _,s = splitSegment seg l in
           if verifyDataReceivedSize cs s then
-            insertTailList list s
+            (DLL.dll_insert_at_tail list s; list)
           else
             list
         ) else (
@@ -943,56 +945,56 @@ let mergeSegments (cs:pointer connection) (strm:pointer quic_stream) (seg:pointe
           list
         )
       ) else (
-        let c:(pointer (pointer qstream_segment)) = B.alloca list.lhead 1ul in
+        let c:(pointer qstream_segment) = B.alloca (DLL.coerce_non_null (DLL.dll_head list)) 1ul in
         let listmutable = B.alloca list 1ul in
         C.Loops.do_while
-          (fun h break -> live h c /\ (break ==> False))    
-          (fun _ -> 
+          (fun h break -> live h c /\ (break ==> False))
+          (fun _ ->
             let list,keepgoing = mergeSegmentsBody cs list (!*c) seg in
             if not keepgoing then (
               listmutable *= list
             );
-            c *= (!*(!*c)).flink;
+            c *= DLL.coerce_non_null (DLL.next_node list (!*c));
             not keepgoing // do... while keepgoing
-          );                           
+          );
         !*listmutable
       )
     )
   in
-  upd_partialsegments (!*strm).p.qsm_state list;
+  upd_partialsegments (DLL.node_val strm).qsm_state list;
   pop_frame()
 
 (** Stream data has arrived from the peer.  Merge it in, taking care of out-of-order and
     partial/overlapping/disjoint segments *)
-let streamRecvInternal (cs:pointer connection) (ps:packet_space) (strm:pointer quic_stream) (seg:pointer qstream_segment): ST unit
+let streamRecvInternal (cs:pointer connection) (ps:packet_space) (strm:quic_stream) (seg:qstream_segment): ST unit
    (requires (fun _ -> true))
    (ensures (fun _ _ _ -> true))
 =
   push_frame();
   let strmm = strm_get_mutable strm in
   if strmm.recvState = RecvStreamRecv then (
-      if (!*seg).p.offset = strmm.nextReadOffset then (
+      if (DLL.node_val seg).offset = strmm.nextReadOffset then (
           if verifyDataReceivedSize cs seg then
             makeStreamDataAvailable cs ps strm seg
        ) else if U64.gt (segmentEnd seg) strmm.nextReadOffset then (
           // Data has arrived out of order.  Buffer it for later.
           // Note that the partial segments may be overlapping.
           mergeSegments cs strm seg;
-          let pKeepGoing = B.alloca (not (is_null strmm.partialsegments.lhead)) 1ul in
-          let inv h = B.live h seg in
+          let pKeepGoing = B.alloca (not (DLL.is_null_node (DLL.dll_head strmm.partialsegments))) 1ul in
+          let inv h = DLL.node_valid h seg in
           let test (): Stack bool (requires inv) (ensures (fun _ _ -> inv)) =
             !*pKeepGoing
           in
           let body() : Stack unit (requires inv) (ensures (fun _ _ -> inv)) =
               let strmm = strm_get_mutable strm in
-              let seg = strmm.partialsegments.lhead in
-              let seg_offset = (!*seg).p.offset in
+              let seg = DLL.coerce_non_null (DLL.dll_head strmm.partialsegments) in
+              let seg_offset = (DLL.node_val seg).offset in
               let seg_end = segmentEnd seg in
               if (U64.lte seg_offset strmm.nextReadOffset) &&
                  (U64.gt seg_end strmm.nextReadOffset) then (
                 // The first segment overlaps with NextReadOffset.
-                let list = removeEntryList strmm.partialsegments seg in
-                upd_partialsegments (!*strm).p.qsm_state list;
+                DLL.dll_remove_mid strmm.partialsegments seg;
+                upd_partialsegments (DLL.node_val strm).qsm_state strmm.partialsegments;
                 let seg =
                   if U64.lt seg_offset strmm.nextReadOffset then (
                     let l = U64.(strmm.nextReadOffset -^ seg_offset) in
@@ -1003,7 +1005,7 @@ let streamRecvInternal (cs:pointer connection) (ps:packet_space) (strm:pointer q
                 in
                 makeStreamDataAvailable cs ps strm seg;
                 let strmm = strm_get_mutable strm in
-                pKeepGoing *= not (is_null strmm.partialsegments.lhead) // loop while the list is non-empty
+                pKeepGoing *= not (DLL.is_null_node (DLL.dll_head strmm.partialsegments)) // loop while the list is non-empty
               ) else (
                 pKeepGoing *= false // stop looping
               )
@@ -1015,7 +1017,7 @@ let streamRecvInternal (cs:pointer connection) (ps:packet_space) (strm:pointer q
 
 (** Stream data has arrived from the peer.  Merge it in, taking care of out-of-order and
     partial/overlapping/disjoint segments *)
-let streamRecv (cs:pointer connection) (id:U64.t) (seg:pointer qstream_segment): ST unit
+let streamRecv (cs:pointer connection) (id:U64.t) (seg:qstream_segment): ST unit
    (requires (fun _ -> true))
    (ensures (fun _ _ _ -> true))
 =
@@ -1025,14 +1027,14 @@ let streamRecv (cs:pointer connection) (id:U64.t) (seg:pointer qstream_segment):
     failwith (of_literal "Receiving data from an unexpected uni stream direction");
   // bugbug: ensure that the stream ID is in bounds
   let strm = openStreamInternal cs id in
-  if strm = null then
+  if DLL.is_null_node strm then
     print_string (sprintf "Dropping received data for invalid stream ID %uL\n" id)
   else
-    streamRecvInternal cs ApplicationSpace strm seg;
+    streamRecvInternal cs ApplicationSpace (DLL.coerce_non_null strm) seg;
   pop_frame()
 
 //bugbug: probably want to handle miTLS failures more gracefully than returning unit.
-let streamRecvInitialCrypto (eng:pointer engine) (seg:pointer qstream_segment) (plaintext_cid:connectionid_t): ST (pointer connection)
+let streamRecvInitialCrypto (eng:pointer engine) (seg:qstream_segment) (plaintext_cid:connectionid_t): ST (pointer connection)
    (requires (fun _ -> true))
    (ensures (fun _ _ _ -> true))
 =
@@ -1041,9 +1043,9 @@ let streamRecvInitialCrypto (eng:pointer engine) (seg:pointer qstream_segment) (
   let pss = getPacketSpaceState cs InitialSpace in
   let strm = pss.crypto_stream in
   processCryptoSegment cs seg;
-  let nextReadOffset = (!*seg).p.datalength in
+  let nextReadOffset = (DLL.node_val seg).datalength in
   let nextReadOffset64 = Cast.uint32_to_uint64 nextReadOffset in
-  upd_nextReadOffset (!*strm).p.qsm_state nextReadOffset64;
+  upd_nextReadOffset (DLL.node_val strm).qsm_state nextReadOffset64;
   pop_frame();
   cs
 
@@ -1054,13 +1056,13 @@ let setMaxStreamData (cs:pointer connection) (stream:U64.t) (maxdata:U64.t) : ST
 =
   push_frame();
   let strm = quic_OpenStream cs stream in
-  let strmm = strm_get_mutable strm in
+  let strmm = strm_get_mutable (DLL.coerce_non_null strm) in
   let maxdata = if U64.lt maxdata strmm.maxStreamData then
     strmm.maxStreamData
   else
     maxdata
   in
-  upd_maxStreamData (!*strm).p.qsm_state maxdata;
+  upd_maxStreamData (DLL.node_val (DLL.coerce_non_null strm)).qsm_state maxdata;
   pop_frame()
 
 (** Called when a previously sent stream segment has been ACK'd by the peer.  This
@@ -1070,9 +1072,9 @@ let ackStream (cs:pointer connection) (t:streamRecoveryTracker): ST unit
    (ensures (fun _ _ _ -> true))
 =
   push_frame();
-  setEvent (!*(t.segment)).p.available;
+  setEvent (DLL.node_val (t.segment)).available;
   pop_frame()
-  
+
 (** Called when a previously sent CRYPTO segment has been ACK'd by the peer.  This
     releases the data *)
 let ackCrypto (cs:pointer connection) (t:cryptoRecoveryTracker): ST unit
@@ -1080,7 +1082,7 @@ let ackCrypto (cs:pointer connection) (t:cryptoRecoveryTracker): ST unit
    (ensures (fun _ _ _ -> true))
 =
   push_frame();
-  setEvent (!*(t.cryptosegment)).p.available;
+  setEvent (DLL.node_val (t.cryptosegment)).available;
   pop_frame()
 
 (** Called by LossAndCongestion when it determines that a packet has been lost,
@@ -1093,14 +1095,14 @@ let lostStream (cs:pointer connection) (t:streamRecoveryTracker): ST unit
   let csm = conn_get_mutable cs in
   let strm = findStream csm t.recoverystreamID in
   // Place this segment back in the list of segments to send
-  let strmm = strm_get_mutable strm in
+  let strmm = strm_get_mutable (DLL.coerce_non_null strm) in
   let seg = t.segment in
-  let list = insertHeadList strmm.segments seg in
-  upd_segments (!*strm).p.qsm_state list;
-  upd_dataSentSub (!*cs).csm_state (!*seg).p.datalength;
+  DLL.dll_insert_at_head strmm.segments seg;
+  upd_segments (DLL.node_val (DLL.coerce_non_null strm)).qsm_state strmm.segments;
+  upd_dataSentSub (!*cs).csm_state (DLL.node_val seg).datalength;
   setHasReadyToSend cs;
   pop_frame()
-  
+
 (** Called by LossAndCongestion when it determines that a packet has been lost,
     and the stream data must be retransmitted. *)
 let lostCrypto (cs:pointer connection) (ps:packet_space) (t:cryptoRecoveryTracker): ST unit
@@ -1114,26 +1116,25 @@ let lostCrypto (cs:pointer connection) (ps:packet_space) (t:cryptoRecoveryTracke
   // Place this segment back in the list of segments to send
   let strmm = strm_get_mutable strm in
   let seg = t.cryptosegment in
-  let list = insertHeadList strmm.segments seg in
-  upd_segments (!*strm).p.qsm_state list;
+  DLL.dll_insert_at_head strmm.segments seg;
+  upd_segments (DLL.node_val strm).qsm_state strmm.segments;
   setHasReadyToSend cs;
   pop_frame()
-  
+
 (** Reset a stream in response to RST_STREAM *)
 let rstStream (cs:pointer connection) (stream:U64.t) (errorCode:U16.t) (finalOffset:U64.t): ST unit
    (requires (fun _ -> true))
    (ensures (fun _ _ _ -> true))
 =
   push_frame();
-  let strm = quic_OpenStream cs stream in
-  upd_recvstate (!*strm).p.qsm_state RecvStreamResetRecvd;
-  upd_error_code (!*strm).p.qsm_state errorCode;
+  let strm = DLL.coerce_non_null (quic_OpenStream cs stream) in
+  upd_recvstate (DLL.node_val strm).qsm_state RecvStreamResetRecvd;
+  upd_error_code (DLL.node_val strm).qsm_state errorCode;
   print_string (sprintf "RST_STREAM StreamID=%uL errorCode=%us\n" stream errorCode);
   (* Now report the stream as ready, so QUIC_recv() will wake for it *)
   let csm = conn_get_mutable cs in
-  let holder = empty_entry strm in
-  let pholder = B.malloc HyperStack.root holder 1ul in
-  let list = insertTailList csm.readystreams pholder in
-  upd_readystreams (!*cs).csm_state list;
+  let pholder = DLL.node_of HyperStack.root strm in
+  DLL.dll_insert_at_tail csm.readystreams pholder;
+  upd_readystreams (!*cs).csm_state csm.readystreams;
   setEvent (!*cs).streamDataAvailable;
   pop_frame()
