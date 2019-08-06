@@ -232,9 +232,10 @@ type lossRecoveryTracker_fixed =
     | CryptoTracker of cryptoRecoveryTracker
     | StrmTracker of streamRecoveryTracker
     | AckTracker of ackblock_list
-    | FixedFrameTracker of pointer fixedframe
+    | FixedFrameTracker of fixedframe
 
 type lossRecoveryTracker = DLL.node lossRecoveryTracker_fixed
+type lossRecoveryTracker_or_null = DLL.nullable_node lossRecoveryTracker_fixed
 type lossRecoveryTracker_list = DLL.dll lossRecoveryTracker_fixed
 
 (** Data associated with a sent packet, used to recover in case of loss *)
@@ -250,6 +251,7 @@ type sentPacket_fixed = {
     }
 
 type sentPacket = DLL.node sentPacket_fixed
+type sentPacket_or_null = DLL.nullable_node sentPacket_fixed
 type sentPacket_list = DLL.dll sentPacket_fixed
 
 (** Mutable state related to the LossAndCongestion module.  Fields are generally

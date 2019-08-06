@@ -33,6 +33,8 @@ module I32 = FStar.Int32
 module Cast = FStar.Int.Cast
 module B = LowStar.Buffer
 
+module DLL = DoublyLinkedListIface
+
 // Loss Detection Constants - See section 3.2.1 "Constants of interest"
 let kMaxTLPs = 2ul
 let kReorderingThreshold = 3UL
@@ -65,8 +67,8 @@ let setLossDetectionAlarm (cs:pointer connection): ST unit
     let alarm_duration =
       if l.handshake_packets_outstanding then (
         // Handshake retransmission alarm
-        let alarm_duration = 
-          if l.smoothed_rtt = 0L then 
+        let alarm_duration =
+          if l.smoothed_rtt = 0L then
             (2L *^ kDefaultInitialRtt)
           else
             (2L *^ l.smoothed_rtt)
@@ -128,10 +130,9 @@ let onPacketSent (cs:pointer connection) (ps:packet_space) (packet_number:U64.t)
     bytes = Cast.uint32_to_uint16 sent_bytes;
     tracker = tracker;
     } in
-  let sp = empty_entry spfixed in
-  let psp = B.malloc HyperStack.root sp 1ul in
-  let list = insertTailList (!*(!*cs).landc_state).sent_packets psp in
-  upd_sent_packets (!*cs).landc_state list;
+  let psp = DLL.node_of HyperStack.root spfixed in
+  DLL.dll_insert_at_tail (!*(!*cs).landc_state).sent_packets psp;
+  upd_sent_packets (!*cs).landc_state (!*(!*cs).landc_state).sent_packets;
   if not is_ack_only then (
     onPacketSentCC cs sent_bytes;
     inc_retransmittable_packets_outstanding (!*cs).landc_state;
@@ -161,7 +162,7 @@ let updateRtt (cs:pointer connection) (latest_rtt:I64.t): ST unit
     upd_smoothed_rtt (!*cs).landc_state smoothed_rtt
   );
   pop_frame()
-  
+
 (** Handle ACK of a frame of ACK data *)
 let ackAck (cs:pointer connection) (a:ackblock_list): ST unit
    (requires (fun _ -> true))
@@ -169,14 +170,15 @@ let ackAck (cs:pointer connection) (a:ackblock_list): ST unit
 =
   push_frame();
   // Free all of the ackblock_list elements
-  let pb = B.alloca a.lhead 1ul in
+  let pb = B.alloca (DLL.dll_head a) 1ul in
   C.Loops.do_while
     (fun h break -> live h pb /\ (break ==> False))
     (fun _ ->
-      let b = !*pb in
-      pb *= (!*b).flink;
-      B.free b;
-      is_null !*pb // do...while !is_null !*pb
+      let b = DLL.coerce_non_null !*pb in
+      pb *= DLL.next_node a b;
+      (* FIXME[jb] We don't have free in dlist iface yet *)
+      // B.free b;
+      DLL.is_null_node !*pb // do...while !is_null !*pb
   );
   pop_frame()
 
@@ -192,7 +194,7 @@ let registerAck (cs:pointer connection) (ps:packet_space) (pn:U64.t): ST unit
   p.outgoingAcks.(index) <- pn;
   (!*cs).packetSpaces.(psn) <- {p with outgoingAckCount = U32.(index+^1ul) };
   pop_frame()
- 
+
 // This belongs in QUICFrame, but needs to be called from this higher-level module
 (** Handle loss of a frame of ACK data *)
 let lostAck (cs:pointer connection) (ps:packet_space) (a:ackblock_list): ST unit
@@ -200,13 +202,13 @@ let lostAck (cs:pointer connection) (ps:packet_space) (a:ackblock_list): ST unit
    (ensures (fun _ _ _ -> true))
 =
   push_frame();
-  let pb = B.alloca a.lhead 1ul in
+  let pb = B.alloca (DLL.dll_head a) 1ul in
   C.Loops.do_while
     (fun h break -> live h pb /\ (break ==> False))
     (fun _ ->
-      let b = !*pb in
-      let start = (!*b).p.start in
-      let length = (!*b).p.length in
+      let b = DLL.coerce_non_null !*pb in
+      let start = (DLL.node_val b).start in
+      let length = (DLL.node_val b).length in
       let f (i:U64.t) : ST unit
         (requires (fun _ -> true))
         (ensures (fun _ _ _ -> true))
@@ -215,20 +217,21 @@ let lostAck (cs:pointer connection) (ps:packet_space) (a:ackblock_list): ST unit
         registerAck cs ps pn
         in
       C.Loops.for64 0UL length (fun h _ -> true) f;
-      pb *= (!*b).flink;
-      B.free b;
-      is_null !*pb // do...while !is_null !*pb
+      pb *= DLL.next_node a b;
+      (* FIXME[jb] We don't have free in dlist iface yet *)
+      // B.free b;
+      DLL.is_null_node !*pb // do...while !is_null !*pb
   );
   pop_frame()
 
 (** This handles Ack of a fixedframe *)
-let ackFixedframe (cs:pointer connection) (pff:pointer fixedframe): ST unit
+let ackFixedframe (cs:pointer connection) (pff:fixedframe): ST unit
    (requires (fun _ -> true))
    (ensures (fun _ _ _ -> true))
 =
   push_frame();
   // bugbug: on ACK of CONNECTION_CLOSE and APPLICATION_CLOSE, cease transmission
-  let framedata = (!*pff).p.framedata in
+  let framedata = (DLL.node_val pff).framedata in
   let frametype = !*framedata in
   (match frametype with
   | 0x00uy -> print_string "ACKing PADDING\n"
@@ -236,10 +239,11 @@ let ackFixedframe (cs:pointer connection) (pff:pointer fixedframe): ST unit
     print_string "ACKing RST_STREAM\n";
     let streamID,_  = getvar framedata 1ul in
     let strm = openStreamInternal cs streamID in
-    if strm <> null then (
+    if not (DLL.is_null_node strm) then (
+      let strm = DLL.coerce_non_null strm in
       let strmm = strm_get_mutable strm in
       if strmm.sendState = SendStreamResetSent then
-        upd_sendstate (!*strm).p.qsm_state SendStreamResetRecvd
+        upd_sendstate (DLL.node_val strm).qsm_state SendStreamResetRecvd
       )
     )
   | 0x02uy -> (
@@ -262,50 +266,51 @@ let ackFixedframe (cs:pointer connection) (pff:pointer fixedframe): ST unit
   | 0x19uy -> print_string "ACKing NEW_TOKEN\n"
   | _ -> failwith (of_literal "ACKing Unknown fixed-frame kind")
   );
-  let hWait = (!*pff).p.hWait in
+  let hWait = (DLL.node_val pff).hWait in
   if hWait <> nullptr then
     setEvent hWait;
   B.free framedata;
   pop_frame()
-  
-let lostFixedframe (cs:pointer connection) (pff:pointer fixedframe): ST unit
+
+let lostFixedframe (cs:pointer connection) (pff:fixedframe): ST unit
    (requires (fun _ -> true))
    (ensures (fun _ _ _ -> true))
 =
   push_frame();
   let csm = conn_get_mutable cs in
-  let list = insertHeadList csm.fixedframes pff in
-  upd_fixedframes (!*cs).csm_state list;
+  DLL.dll_insert_at_head csm.fixedframes pff;
+  upd_fixedframes (!*cs).csm_state csm.fixedframes;
   pop_frame()
 
 (** Handle loss of a full packet *)
-let onPacketLost (cs:pointer connection) (lp:pointer sentPacket) (now:I64.t): ST unit
+let onPacketLost (cs:pointer connection) (lp:sentPacket) (now:I64.t): ST unit
    (requires (fun _ -> true))
    (ensures (fun _ _ _ -> true))
 =
   push_frame();
   // Remove lost packets from bytes_in_flight.
-  let time_since_sent = I64.(now -^ (!*lp).p.time) in
+  let time_since_sent = I64.(now -^ (DLL.node_val lp).time) in
   let tss = I64.(time_since_sent /^ 10000L) in
   let landcm = landc_get_mutable cs in
-  let bytes16 = (!*lp).p.bytes in
+  let bytes16 = (DLL.node_val lp).bytes in
   let bytes64 = Cast.uint16_to_uint64 bytes16 in
   upd_bytes_in_flight (!*cs).landc_state U64.(landcm.bytes_in_flight -^ bytes64);
-  let pt = B.alloca (!*lp).p.tracker.lhead 1ul in
+  let pt = B.alloca (DLL.dll_head (DLL.node_val lp).tracker) 1ul in
   C.Loops.do_while
     (fun h break -> live h pt /\ (break ==> False))
     (fun _ ->
-      let t:(pointer lossRecoveryTracker) = !*pt in
-      (match (!*t).p with
-      | CryptoTracker c -> lostCrypto cs (!*lp).p.ps c
+      let t:(lossRecoveryTracker) = DLL.coerce_non_null !*pt in
+      (match (DLL.node_val t) with
+      | CryptoTracker c -> lostCrypto cs (DLL.node_val lp).ps c
       | StrmTracker s -> lostStream cs s
-      | AckTracker a -> lostAck cs (!*lp).p.ps a
+      | AckTracker a -> lostAck cs (DLL.node_val lp).ps a
       | FixedFrameTracker p -> lostFixedframe cs p
       );
       let t = !*pt in
-      pt *= (!*(!*pt)).flink;
-      B.free t;
-      is_null !*pt // do... while !is_null !*pt
+      pt *= (DLL.next_node (DLL.node_val lp).tracker (!*pt));
+      (* FIXME[jb] We don't have free in dlist iface yet *)
+      // B.free t;
+      DLL.is_null_node !*pt // do... while !is_null !*pt
     );
   pop_frame()
 
@@ -322,7 +327,7 @@ let startNewRecoveryEpoch (cs:pointer connection): ST unit
   upd_congestion_window (!*cs).landc_state cw;
   upd_ssthresh (!*cs).landc_state cw;
   pop_frame()
-  
+
 (** Determine which previously-sent packets are lost.  This may initiate
     retransmission of data. *)
 let detectLostPackets (cs:pointer connection) (largest_acked:U64.t): ST unit
@@ -332,7 +337,7 @@ let detectLostPackets (cs:pointer connection) (largest_acked:U64.t): ST unit
   push_frame();
   upd_loss_time (!*cs).landc_state 0L;
   let landcm = landc_get_mutable cs in
-  if not (is_null landcm.sent_packets.lhead) then I64.(
+  if not (DLL.is_empty landcm.sent_packets) then I64.(
     let delay_until_lost =
       if landcm.time_reordering_fraction_denominator <> 0L then (
         let m = maxi64 landcm.latest_rtt landcm.smoothed_rtt in
@@ -345,27 +350,29 @@ let detectLostPackets (cs:pointer connection) (largest_acked:U64.t): ST unit
       ) else (
         0x7fffffffffffffffL // maxint64
       ) in
-    let last = (!*landcm.sent_packets.ltail) in
-    let largest_lost_packet_number = last.p.packet_number in // last is largest
+    let last = DLL.coerce_non_null (DLL.dll_tail landcm.sent_packets) in
+    let largest_lost_packet_number = (DLL.node_val last).packet_number in // last is largest
     let now = getSystemTime() in
     let plist = B.alloca landcm.sent_packets 1ul in
-    let punacked = B.alloca landcm.sent_packets.lhead 1ul in
+    let punacked = B.alloca (DLL.dll_head landcm.sent_packets) 1ul in
     C.Loops.do_while
       (fun h break -> live h punacked /\ (break ==> False))
       (fun _ ->
-          let unacked:(pointer sentPacket) = !*punacked in
-          let time_since_sent = now -^ (!*unacked).p.time in
-          let packet_delta = U64.(largest_acked -^ (!*unacked).p.packet_number) in
+          let unacked:sentPacket = DLL.coerce_non_null !*punacked in
+          let time_since_sent = now -^ (DLL.node_val unacked).time in
+          let packet_delta = U64.(largest_acked -^ (DLL.node_val unacked).packet_number) in
           if (time_since_sent >^ delay_until_lost) ||
              (U64.gt packet_delta landcm.reordering_threshold) then (
-            plist *= removeEntryList (!*plist) unacked;
+            plist *= (DLL.dll_remove_mid (!*plist) unacked; (!*plist));
             onPacketLost cs unacked now;
-            B.free unacked
+            (* FIXME[jb] We don't have free in dlist iface yet *)
+            // B.free unacked
+            ()
           ) else if (landcm.loss_time = 0L) && (delay_until_lost <> 0x7fffffffffffL) then (
             upd_loss_time (!*cs).landc_state (now +^ delay_until_lost -^ time_since_sent)
           );
-          punacked *= (!*(!*punacked)).flink;
-          is_null !*punacked // do... while !is_null !*punacked
+          punacked *= DLL.next_node landcm.sent_packets (!*punacked);
+          DLL.is_null_node !*punacked // do... while !is_null !*punacked
       );
     upd_sent_packets (!*cs).landc_state !*plist;
     if connectionHasMoreToSend cs <> None then (
@@ -379,27 +386,27 @@ let detectLostPackets (cs:pointer connection) (largest_acked:U64.t): ST unit
   pop_frame()
 
 (** Determine if a packet number has been sent previously or not *)
-let sentPacketsContains (sent_packets:sentPacket_list) (pn:U64.t): ST (pointer_or_null sentPacket)
+let sentPacketsContains (sent_packets:sentPacket_list) (pn:U64.t): ST (sentPacket_or_null)
    (requires (fun _ -> true))
    (ensures (fun _ _ _ -> true))
 =
   push_frame();
-  let head = sent_packets.lhead in
-  let pp = B.alloca head 1ul in
-  let pret = B.alloca null 1ul in
-  let headisnull = is_null head in
+  let head = DLL.dll_head sent_packets in
+  let pp : pointer sentPacket_or_null = B.alloca head 1ul in
+  let pret = B.alloca DLL.null_node 1ul in
+  let headisnull = DLL.is_null_node head in
   let pstop = B.alloca headisnull 1ul in
   let inv h = B.live h pp in
   let test (): Stack bool (requires inv) (ensures (fun _ _ -> inv)) =
     not !*pstop
   in
   let body (): Stack unit (requires inv) (ensures (fun _ _ -> inv)) =
-    let isfound = (!*(!*pp)).p.packet_number = pn in
+    let isfound = (DLL.node_val (DLL.coerce_non_null !*pp)).packet_number = pn in
     if isfound then (
       pret *= !*pp
       );
-    pp *= (!*(!*pp)).flink;
-    pstop *= ((is_null !*pp) || isfound)
+    pp *= (DLL.next_node sent_packets (DLL.coerce_non_null !*pp));
+    pstop *= ((DLL.is_null_node !*pp) || isfound)
   in
   C.Loops.while test body;
   let ret = !*pret in
@@ -415,12 +422,13 @@ let onAckReceived (cs:pointer connection) (largest_acked:U64.t) (ack_delay:U16.t
   let lm = landc_get_mutable cs in
   upd_largest_acked_packet (!*cs).landc_state largest_acked;
   let packet = sentPacketsContains lm.sent_packets largest_acked in
-  if not (is_null packet) then I64.(
-    let largest_acked_time = (!*packet).p.time in
+  if not (DLL.is_null_node packet) then I64.(
+    let packet = DLL.coerce_non_null packet in
+    let largest_acked_time = (DLL.node_val packet).time in
     let now = getSystemTime() in
     let latest_rtt = now -^ largest_acked_time in
     let ack_delay64 = Cast.uint16_to_int64 ack_delay in
-    let latest_rtt = 
+    let latest_rtt =
       if latest_rtt >^ ack_delay64 then (
         latest_rtt -^ ack_delay64
       ) else (
@@ -437,17 +445,17 @@ let onAckReceived (cs:pointer connection) (largest_acked:U64.t) (ack_delay:U16.t
   pop_frame()
 
 (** Congestion Control for an ack'd packet *)
-let onPacketAckedCC (cs:pointer connection) (acked_packet: pointer sentPacket): ST unit
+let onPacketAckedCC (cs:pointer connection) (acked_packet: sentPacket): ST unit
    (requires (fun _ -> true))
    (ensures (fun _ _ _ -> true))
 =
   push_frame();
   let bytes_in_flight = (!*(!*cs).landc_state).bytes_in_flight in
-  let acked_bytes = (!*acked_packet).p.bytes in
+  let acked_bytes = (DLL.node_val acked_packet).bytes in
   let acked_bytes = Cast.uint16_to_uint64 acked_bytes in
   let bytes_in_flight = U64.(bytes_in_flight +^ acked_bytes) in
   upd_bytes_in_flight (!*cs).landc_state bytes_in_flight;
-  if U64.gte (!*acked_packet).p.packet_number (!*(!*cs).landc_state).end_of_recovery then (
+  if U64.gte (DLL.node_val acked_packet).packet_number (!*(!*cs).landc_state).end_of_recovery then (
     let cw = (!*(!*cs).landc_state).congestion_window in
     let ssthresh =  (!*(!*cs).landc_state).ssthresh in
     let cw = if U64.lt cw ssthresh then (
@@ -460,7 +468,7 @@ let onPacketAckedCC (cs:pointer connection) (acked_packet: pointer sentPacket): 
   );
   // else Do not increase congestion window in recovery period.
   pop_frame()
-  
+
 let onRetransmissionTimeoutVerified (cs:pointer connection): ST unit
    (requires (fun _ -> true))
    (ensures (fun _ _ _ -> true))
@@ -470,19 +478,19 @@ let onRetransmissionTimeoutVerified (cs:pointer connection): ST unit
   pop_frame()
 
 (** Ack one tracker *)
-let ackTracker (cs:pointer connection) (t:pointer lossRecoveryTracker): ST unit
+let ackTracker (cs:pointer connection) (t:lossRecoveryTracker): ST unit
    (requires (fun _ -> true))
    (ensures (fun _ _ _ -> true))
 =
   push_frame();
-  (match (!*t).p with
+  (match (DLL.node_val t) with
   | CryptoTracker c -> ackCrypto cs c
   | StrmTracker s -> ackStream cs s
   | AckTracker a -> ackAck cs a
   | FixedFrameTracker f -> ackFixedframe cs f
   );
   pop_frame()
-  
+
 (** Walk the lossRecoveryTracker list and ack each element.  On return, all
     entries in the list have been freed.  *)
 let ackTrackerList (cs:pointer connection) (l:lossRecoveryTracker_list) : ST unit
@@ -490,17 +498,19 @@ let ackTrackerList (cs:pointer connection) (l:lossRecoveryTracker_list) : ST uni
    (ensures (fun _ _ _ -> true))
 =
   push_frame();
-  let head = l.lhead in
-  let pp = B.alloca head 1ul in
+  let head = DLL.dll_head l in
+  let pp : pointer lossRecoveryTracker_or_null  = B.alloca head 1ul in
   let inv h = B.live h pp in
   let test (): Stack bool (requires inv) (ensures (fun _ _ -> inv)) =
-    not (is_null !*pp)
+    not (DLL.is_null_node !*pp)
   in
   let body (): Stack unit (requires inv) (ensures (fun _ _ -> inv)) =
-    ackTracker cs !*pp;
+    ackTracker cs (DLL.coerce_non_null !*pp);
     let tmp = !*pp in
-    pp *= (!*(!*pp)).flink;
-    B.free tmp
+    pp *= DLL.next_node l (DLL.coerce_non_null !*pp);
+    (* FIXME[jb] We don't have free in dlist iface yet *)
+    // B.free tmp
+    ()
   in
   C.Loops.while test body;
   pop_frame()
@@ -513,15 +523,18 @@ let onPacketAcked (cs:pointer connection) (acked_packet_number:U64.t): ST unit
   push_frame();
   let lm = landc_get_mutable cs in
   let acked_packet = sentPacketsContains lm.sent_packets acked_packet_number in
-  if not (is_null acked_packet) then (
+  if not (DLL.is_null_node acked_packet) then (
+    let acked_packet = DLL.coerce_non_null acked_packet in
     onPacketAckedCC cs acked_packet;
-    let list = removeEntryList lm.sent_packets acked_packet in
-    upd_sent_packets (!*cs).landc_state list;
-    if (!*acked_packet).p.bytes <> 0us then (
+    DLL.dll_remove_mid lm.sent_packets acked_packet;
+    upd_sent_packets (!*cs).landc_state lm.sent_packets;
+    if (DLL.node_val acked_packet).bytes <> 0us then (
       dec_retransmittable_packets_outstanding (!*cs).landc_state
     );
-    ackTrackerList cs (!*acked_packet).p.tracker;
-    B.free acked_packet // the p.tracker list has already been freed
+    ackTrackerList cs (DLL.node_val acked_packet).tracker;
+    (* FIXME[jb] We don't have free in dlist iface yet *)
+    // B.free acked_packet // the p.tracker list has already been freed
+    ()
   ) else (
     () // packet wasn't found in sent_packets
   );
@@ -621,7 +634,7 @@ let makeLossAndCongestion(useTimeLossDetection:bool): ST (pointer lossAndCongest
   let landcm = {
     loss_detection_alarm = nullptr;
     ping_alarm = nullptr;
-    
+
     handshake_count = 0ul;
     tlp_count = 0ul;
     rto_count = 0ul;
@@ -636,7 +649,7 @@ let makeLossAndCongestion(useTimeLossDetection:bool): ST (pointer lossAndCongest
     time_reordering_fraction_numerator = trfn;
     time_reordering_fraction_denominator = trfd;
     loss_time = 0L;
-    sent_packets = empty_list;
+    sent_packets = DLL.dll_new HyperStack.root;
     retransmittable_packets_outstanding = 0ul;
     handshake_packets_outstanding = false;
     bytes_in_flight = 0UL;
