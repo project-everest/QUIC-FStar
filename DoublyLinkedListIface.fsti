@@ -53,12 +53,13 @@ val node_val (n:node 'a) :
     (requires (fun h0 -> node_valid h0 n))
     (ensures (fun h0 v h1 -> h0 == h1 /\ v == g_node_val h0 n))
 
-val node_of (v:'a) :
-  HST.StackInline (node 'a)
-    (requires (fun h0 -> True))
+val node_of (rid:HS.rid) (v:'a) :
+  HST.Inline (node 'a)
+    (requires (fun h0 -> HST.is_eternal_region rid))
     (ensures (fun h0 n h1 ->
          B.modifies B.loc_none h0 h1 /\
          B.fresh_loc (fp_node n) h0 h1 /\
+         B.loc_includes (B.loc_region_only false rid) (fp_node n) /\
          node_valid h1 n /\
          v == g_node_val h1 n))
 
@@ -128,12 +129,13 @@ let as_payload_list (h:HS.mem) (d:dll 'a) : GTot (list 'a) =
 /// Creating an empty DoublyLinkedList, and quickly accessing the head
 /// and tail of a DoublyLinkedList
 
-val dll_new (u:unit)  :
-  HST.StackInline (dll 'a)
-    (requires (fun h0 -> True))
+val dll_new (rid:HS.rid)  :
+  HST.Inline (dll 'a)
+    (requires (fun h0 -> HST.is_eternal_region rid))
     (ensures (fun h0 d h1 ->
          B.modifies B.loc_none h0 h1 /\
          B.fresh_loc (fp_dll h1 d) h0 h1 /\
+         B.loc_includes (B.loc_region_only false rid) (fp_dll h1 d) /\
          dll_valid h1 d /\
          as_list h1 d == []))
 

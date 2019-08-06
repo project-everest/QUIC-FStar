@@ -73,8 +73,8 @@ let g_node_val h n =
 let node_val n =
   (!*n).DLL.p
 
-let node_of v =
-  B.alloca (DLL.empty_node v) 1ul
+let node_of rid v =
+  B.malloc rid (DLL.empty_node v) 1ul
 
 /// Nullable Nodes
 
@@ -119,8 +119,8 @@ let as_list h d =
 /// Creating an empty DoublyLinkedList, and quickly accessing the head
 /// and tail of a DoublyLinkedList
 
-let dll_new () =
-  B.alloca DLL.empty_list 1ul
+let dll_new rid =
+  B.malloc rid DLL.empty_list 1ul
 
 let is_empty d =
   B.is_null (!*d).DLL.lhead
