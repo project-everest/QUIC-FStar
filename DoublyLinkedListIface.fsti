@@ -231,6 +231,7 @@ val next_node (d:dll 'a) (n:node 'a) :
          h0 == h1 /\
          dll_valid h1 d /\
          node_valid h1 n /\
+         nullable_node_valid h1 n' /\
          as_list h0 d == as_list h1 d /\
          (g_is_null_node n' = not (L.index_of (as_list h0 d) n < L.length (as_list h0 d) - 1)) /\
          (n' =!= null_node ==>
@@ -245,6 +246,7 @@ val prev_node (d:dll 'a) (n:node 'a) :
          h0 == h1 /\
          dll_valid h1 d /\
          node_valid h1 n /\
+         nullable_node_valid h1 n' /\
          as_list h0 d == as_list h1 d /\
          (g_is_null_node n' = not (L.index_of (as_list h0 d) n > 0)) /\
          (n' =!= null_node ==>

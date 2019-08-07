@@ -574,7 +574,8 @@ let next_node d n =
   let h0 = HST.get () in
   lemma_node_in_valid_dll_is_valid h0 d n;
   if L.index_of (as_list h0 d) n < L.length (as_list h0 d) - 1 then (
-    DLL.extract_nodelist_conn h0 (as_list h0 d) (L.index_of (as_list h0 d) n)
+    DLL.extract_nodelist_conn h0 (as_list h0 d) (L.index_of (as_list h0 d) n);
+    DLL.extract_nodelist_contained h0 (as_list h0 d) (L.index_of (as_list h0 d) n + 1)
   ) else (
     L.lemma_unsnoc_is_last (as_list h0 d)
   );
@@ -584,7 +585,8 @@ let prev_node d n =
   let h0 = HST.get () in
   lemma_node_in_valid_dll_is_valid h0 d n;
   if L.index_of (as_list h0 d) n > 0 then (
-    DLL.extract_nodelist_conn h0 (as_list h0 d) (L.index_of (as_list h0 d) n - 1)
+    DLL.extract_nodelist_conn h0 (as_list h0 d) (L.index_of (as_list h0 d) n - 1);
+    DLL.extract_nodelist_contained h0 (as_list h0 d) (L.index_of (as_list h0 d) n - 1)
   ) else ();
   (!*n).DLL.blink
 
