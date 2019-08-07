@@ -106,6 +106,9 @@ val is_null_node (n:nullable_node 'a) :
     (requires (fun h0 -> nullable_node_valid h0 n))
     (ensures (fun h0 b h1 -> h0 == h1 /\ b == g_is_null_node n))
 
+let fp_nullable_node (n:nullable_node 'a) =
+  if g_is_null_node n then B.loc_none else fp_node (coerce_non_null n)
+
 /// Abstract Predicate to help "recall" that updating the payload
 /// leaves connections unchanged
 
