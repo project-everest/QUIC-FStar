@@ -22,6 +22,15 @@ module U16 = FStar.UInt16
 module B = LowStar.Buffer
 module Cast = FStar.Int.Cast
 
+module U64 = FStar.UInt64
+module U32 = FStar.UInt32
+module U16 = FStar.UInt16
+module U8 = FStar.UInt8
+module Cast = FStar.Int.Cast
+module HS = FStar.HyperStack
+module HST = FStar.HyperStack.ST
+module L = FStar.List.Tot
+module B = LowStar.Buffer
 module DLL = DoublyLinkedListIface
 
 open HeapOps
@@ -31,8 +40,10 @@ open HeapOps
 //
 
 (** Get a readonly copy of the mutable part of a quic_stream *)
-let strm_get_mutable (strm: quic_stream): ST (quic_stream_mutable)
-   (requires (fun _ -> true))   (ensures (fun _ _ _ -> true)) =
+let strm_get_mutable (strm: quic_stream) :
+  StackInline (quic_stream_mutable)
+    (requires (fun h0 -> DLL.node_valid h0 strm /\ B.live h0 (DLL.g_node_val h0 strm).qsm_state))
+    (ensures (fun h0 y h1 -> h0 == h1 /\ y == ((DLL.g_node_val h0 strm).qsm_state@h0))) =
   let strm' = DLL.node_val strm in
   !*(strm'.qsm_state)
 
