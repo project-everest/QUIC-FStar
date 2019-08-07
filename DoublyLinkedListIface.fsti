@@ -237,6 +237,7 @@ val next_node (d:dll 'a) (n:node 'a) :
          nullable_node_valid h1 n' /\
          as_list h0 d == as_list h1 d /\
          (g_is_null_node n' = not (L.index_of (as_list h0 d) n < L.length (as_list h0 d) - 1)) /\
+         (fp_dll h1 d `B.loc_includes` fp_nullable_node n') /\
          (n' =!= null_node ==>
           coerce_non_null n' == L.index (as_list h0 d) (L.index_of (as_list h0 d) n + 1))))
 
@@ -252,6 +253,7 @@ val prev_node (d:dll 'a) (n:node 'a) :
          nullable_node_valid h1 n' /\
          as_list h0 d == as_list h1 d /\
          (g_is_null_node n' = not (L.index_of (as_list h0 d) n > 0)) /\
+         (fp_dll h1 d `B.loc_includes` fp_nullable_node n') /\
          (n' =!= null_node ==>
           coerce_non_null n' == L.index (as_list h0 d) (L.index_of (as_list h0 d) n - 1))))
 
