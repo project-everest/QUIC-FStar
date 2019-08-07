@@ -74,7 +74,7 @@ let upd_error_code (strmm:pointer quic_stream_mutable) (v:U16.t): ST unit
 
 //
 // lossAndCongestion
-// 
+//
 (** Get a readonly view of the mutable LossAndCongestion state *)
 let landc_get_mutable (cs: pointer connection): ST (lossAndCongestion_mutable)
    (requires (fun _ -> true))   (ensures (fun _ _ _ -> true)) =
@@ -84,35 +84,35 @@ let landc_get_mutable (cs: pointer connection): ST (lossAndCongestion_mutable)
 let upd_handshake_packets_outstanding (lm:pointer lossAndCongestion_mutable) (v:bool): ST unit
    (requires (fun _ -> true))   (ensures (fun _ _ _ -> true)) =
   lm *= { !*lm with handshake_packets_outstanding = v }
-  
+
 let upd_largest_acked_packet (lm:pointer lossAndCongestion_mutable) (v:U64.t): ST unit
    (requires (fun _ -> true))   (ensures (fun _ _ _ -> true)) =
   lm *= { !*lm with largest_acked_packet = v }
-  
+
 let upd_latest_rtt (lm:pointer lossAndCongestion_mutable) (v:I64.t): ST unit
    (requires (fun _ -> true))   (ensures (fun _ _ _ -> true)) =
   lm *= { !*lm with latest_rtt = v }
-  
+
 let upd_smoothed_rtt (lm:pointer lossAndCongestion_mutable) (v:I64.t): ST unit
    (requires (fun _ -> true))   (ensures (fun _ _ _ -> true)) =
   lm *= { !*lm with smoothed_rtt = v }
-  
+
 let upd_rttvar (lm:pointer lossAndCongestion_mutable) (v:I64.t): ST unit
    (requires (fun _ -> true))   (ensures (fun _ _ _ -> true)) =
   lm *= { !*lm with rttvar = v }
-  
+
 let upd_time_of_last_sent_packet (lm:pointer lossAndCongestion_mutable) (v:I64.t): ST unit
    (requires (fun _ -> true))   (ensures (fun _ _ _ -> true)) =
   lm *= { !*lm with time_of_last_sent_packet = v }
-  
+
 let upd_largest_sent_packet (lm:pointer lossAndCongestion_mutable) (v:U64.t): ST unit
    (requires (fun _ -> true))   (ensures (fun _ _ _ -> true)) =
   lm *= { !*lm with largest_sent_packet = v }
-  
+
 let upd_sent_packets (lm:pointer lossAndCongestion_mutable) (v:sentPacket_list): ST unit
    (requires (fun _ -> true))   (ensures (fun _ _ _ -> true)) =
   lm *= { !*lm with sent_packets = v }
-  
+
 let upd_bytes_in_flight (lm:pointer lossAndCongestion_mutable) (v:U64.t): ST unit
    (requires (fun _ -> true))   (ensures (fun _ _ _ -> true)) =
   lm *= { !*lm with bytes_in_flight = v }
@@ -321,4 +321,3 @@ let upd_sendAckOnlyIfNeeded (cs:pointer connection) (ps:packet_space) (v:bool): 
   let psn = indexOfPacketSpace ps in
   let p = (!*cs).packetSpaces.(psn) in
   (!*cs).packetSpaces.(psn) <- { p with sendAckOnlyIfNeeded = v }
-
