@@ -24,6 +24,8 @@ module Cast = FStar.Int.Cast
 
 module DLL = DoublyLinkedListIface
 
+open HeapOps
+
 //
 // quic_stream
 //
@@ -172,8 +174,10 @@ let upd_largest_sent_before_rto  (lm:pointer lossAndCongestion_mutable) (v:U64.t
 //
 
 (** Get a readonly view of the mutable connection state *)
-let conn_get_mutable (cs: pointer connection): ST (connection_mutable)
-   (requires (fun _ -> true))   (ensures (fun _ _ _ -> true)) =
+let conn_get_mutable (cs: pointer connection):
+  ST (connection_mutable)
+    (requires (fun h0 -> B.live h0 cs /\ B.live h0 (cs@h0).csm_state))
+    (ensures (fun h0 _ h1 -> h0 == h1)) =
   let cs' = !*cs in
   !*(cs'.csm_state)
 
