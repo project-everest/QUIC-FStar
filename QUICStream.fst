@@ -23,13 +23,17 @@ open QUICFFI
 open QUICUtils
 open QUICTLS
 
+open HeapOps
+
 module U64 = FStar.UInt64
 module U32 = FStar.UInt32
 module U16 = FStar.UInt16
 module U8 = FStar.UInt8
 module Cast = FStar.Int.Cast
+module HS = FStar.HyperStack
+module HST = FStar.HyperStack.ST
+module L = FStar.List.Tot
 module B = LowStar.Buffer
-
 module DLL = DoublyLinkedListIface
 
 let isStreamBidi (stream:U64.t): bool
@@ -54,50 +58,76 @@ let isStreamServerInitiated (stream:U64.t): bool
 
 (** Determine if a stream has segments ready to send *)
 let hasMoreToSend (strm:quic_stream): ST bool
-   (requires (fun _ -> true))
-   (ensures (fun _ _ _ -> true))
+   (requires (fun h0 -> True))
+   (ensures (fun h0 _ h1 -> h0 == h1))
 =
   push_frame();
+  admit (); (* TODO: Prove *)
   let strmm = strm_get_mutable strm in
   let hasmore = if (DLL.is_null_node (DLL.dll_head strmm.segments)) then false else true in
   pop_frame();
   hasmore
 
+#push-options "--z3rlimit 10 --initial_fuel 1 --max_fuel 1 --initial_ifuel 1 --max_ifuel 1"
 (** Find a quic_stream that has data ready for transmission.  May return null
     if there is no ready stream. *)
 let findReadyStream (cs:pointer connection): ST (quic_stream_or_null)
-   (requires (fun _ -> true))
+   (requires heappre (fun h0 ( !* ) ->
+        live h0 cs /\
+        live h0 (!*cs).csm_state /\
+        DLL.dll_valid h0 (!*((!*cs).csm_state)).streams))
    (ensures (fun _ _ _ -> true))
 =
   push_frame();
   let csm = conn_get_mutable cs in
   let strm =
-    if U64.(csm.dataSent >=^ csm.maxDataPeer) then
+    if U64.(csm.dataSent >=^ csm.maxDataPeer) then (
       DLL.null_node // Not permitted to send more stream data when the connection  is at maxDataPeer
-    else (
+    ) else (
       let lst : quic_stream_list = (!*((!*cs).csm_state)).streams in
+      let hhh0 = HST.get () in
       let head : quic_stream_or_null = DLL.dll_head lst in
       let pp : pointer quic_stream_or_null = B.alloca head 1ul in
       let pstrm = B.alloca DLL.null_node 1ul in
       let headisnull = DLL.is_null_node head in
       let pstop = B.alloca headisnull 1ul in
-      let inv h = B.live h pp in
-      let test (): Stack bool (requires inv) (ensures (fun _ _ -> inv)) =
+      let inv h =
+        B.live h pp /\
+        B.live h pstrm /\
+        B.live h pp /\
+        B.live h pstop /\
+        B.loc_disjoint (B.loc_buffer pstop) (DLL.fp_dll h lst) /\
+        B.loc_disjoint (B.loc_buffer pstrm) (DLL.fp_dll h lst) /\
+        B.loc_disjoint (B.loc_buffer pp) (DLL.fp_dll h lst) /\
+        (not (pstop@h) ==> (
+          (pp@h =!= DLL.null_node) /\ (DLL.coerce_non_null (pp@h)) `L.memP` DLL.as_list h lst
+          )) /\
+        DLL.dll_valid h lst in
+      let pre h : GTot Type0 = inv h in
+      let post (x:bool) h : GTot Type0 =
+        inv h /\
+        (x == not (pstop@h)) in
+      let test (): Stack bool (requires (fun h -> pre h)) (ensures (fun _ x h -> post x h)) =
         not !*pstop
       in
-      let body (): Stack unit (requires inv) (ensures (fun _ _ -> inv)) =
+      let body (): Stack unit
+          (requires (fun h0 -> post true h0))
+          (ensures (fun _ _ h1 -> pre h1)) =
         let isready = hasMoreToSend (DLL.coerce_non_null !*pp) in
         if isready then (
           pstrm *= !*pp
           );
-        pp *= DLL.next_node lst (DLL.coerce_non_null !*pp);
-        pstop *= ((DLL.is_null_node !*pp) || isready)
+        pp *= DLL.next_node lst (DLL.coerce_non_null !*pp) ;
+        let nn = DLL.is_null_node !*pp in
+        pstop *= (nn || isready)
       in
-      C.Loops.while test body;
+      let hhh = HST.get () in
+      C.Loops.while #pre #post test body;
       !*pstrm
       ) in
   pop_frame();
   strm
+#pop-options
 
 let getPacketSpaceState (cs:pointer connection) (ps:packet_space): ST packet_space_state
    (requires (fun _ -> true))
