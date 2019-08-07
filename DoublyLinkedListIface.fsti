@@ -167,8 +167,8 @@ val dll_head (d:dll 'a) :
          dll_valid h1 d /\
          nullable_node_valid h1 n /\
          as_list h0 d == as_list h1 d /\
-         (g_is_null_node n == (L.length (as_list h0 d) = 0)) /\
-         (L.length (as_list h0 d) > 0 ==> coerce_non_null n == L.hd (as_list h0 d))))
+         (g_is_null_node n = Nil? (as_list h0 d)) /\
+         (Cons? (as_list h0 d) ==> coerce_non_null n == L.hd (as_list h0 d))))
 
 val dll_tail (d:dll 'a) :
   HST.StackInline (nullable_node 'a)
@@ -178,8 +178,8 @@ val dll_tail (d:dll 'a) :
          dll_valid h1 d /\
          nullable_node_valid h1 n /\
          as_list h0 d == as_list h1 d /\
-         (g_is_null_node n == (L.length (as_list h0 d) = 0)) /\
-         (L.length (as_list h0 d) > 0 ==> coerce_non_null n == snd (L.unsnoc (as_list h0 d)))))
+         (g_is_null_node n = Nil? (as_list h0 d)) /\
+         (Cons? (as_list h0 d) ==> coerce_non_null n == snd (L.unsnoc (as_list h0 d)))))
 
 /// Moving forwards or backwards in a list
 
