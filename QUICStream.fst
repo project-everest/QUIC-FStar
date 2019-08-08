@@ -57,25 +57,31 @@ let isStreamServerInitiated (stream:U64.t): bool
   bit <> 0UL
 
 (** Determine if a stream has segments ready to send *)
-let hasMoreToSend (strm:quic_stream): ST bool
-   (requires (fun h0 -> True))
-   (ensures (fun h0 _ h1 -> h0 == h1))
-=
+let hasMoreToSend (strm:quic_stream):
+  Stack bool
+    (requires (fun h0 ->
+         DLL.node_valid h0 strm /\
+         B.live h0 (DLL.g_node_val h0 strm).qsm_state /\
+         DLL.dll_valid h0 ((DLL.g_node_val h0 strm).qsm_state@h0).segments))
+    (ensures (fun h0 _ h1 -> B.modifies B.loc_none  h0 h1)) =
   push_frame();
-  admit (); (* TODO: Prove *)
   let strmm = strm_get_mutable strm in
   let hasmore = if (DLL.is_null_node (DLL.dll_head strmm.segments)) then false else true in
   pop_frame();
   hasmore
 
-#push-options "--z3rlimit 10 --initial_fuel 1 --max_fuel 1 --initial_ifuel 1 --max_ifuel 1"
+#push-options "--z3rlimit 50 --initial_fuel 1 --max_fuel 1 --initial_ifuel 1 --max_ifuel 1"
 (** Find a quic_stream that has data ready for transmission.  May return null
     if there is no ready stream. *)
 let findReadyStream (cs:pointer connection): ST (quic_stream_or_null)
    (requires heappre (fun h0 ( !* ) ->
         live h0 cs /\
         live h0 (!*cs).csm_state /\
-        DLL.dll_valid h0 (!*((!*cs).csm_state)).streams))
+        DLL.dll_valid h0 (!*((!*cs).csm_state)).streams /\
+        (forall n. {:pattern (n `L.memP` (DLL.as_list h0 (!*((!*cs).csm_state)).streams))} (
+             n `L.memP` (DLL.as_list h0 (!*((!*cs).csm_state)).streams) ==>
+             B.live h0 (DLL.g_node_val h0 n).qsm_state /\
+             DLL.dll_valid h0 ((DLL.g_node_val h0 n).qsm_state@h0).segments))))
    (ensures (fun _ _ _ -> true))
 =
   push_frame();
@@ -91,18 +97,27 @@ let findReadyStream (cs:pointer connection): ST (quic_stream_or_null)
       let pstrm = B.alloca DLL.null_node 1ul in
       let headisnull = DLL.is_null_node head in
       let pstop = B.alloca headisnull 1ul in
+      let h_before_loop = HST.get () in
       let inv h =
-        B.live h pp /\
+        let loc_locals =
+          B.loc_buffer pstop `B.loc_union` B.loc_buffer pstrm `B.loc_union` B.loc_buffer pp
+        in
+        B.modifies loc_locals h_before_loop h /\
         B.live h pstrm /\
         B.live h pp /\
         B.live h pstop /\
-        B.loc_disjoint (B.loc_buffer pstop) (DLL.fp_dll h lst) /\
-        B.loc_disjoint (B.loc_buffer pstrm) (DLL.fp_dll h lst) /\
-        B.loc_disjoint (B.loc_buffer pp) (DLL.fp_dll h lst) /\
+        B.loc_disjoint loc_locals (DLL.fp_dll h lst) /\
         (not (pstop@h) ==> (
           (pp@h =!= DLL.null_node) /\ (DLL.coerce_non_null (pp@h)) `L.memP` DLL.as_list h lst
           )) /\
-        DLL.dll_valid h lst in
+        DLL.dll_valid h lst /\
+        (forall n. {:pattern (n `L.memP` DLL.as_list h lst)} (
+            n `L.memP` (DLL.as_list h lst) ==>
+            B.live h (DLL.g_node_val h n).qsm_state /\
+            B.loc_disjoint loc_locals (B.loc_buffer (DLL.g_node_val h n).qsm_state) /\
+            B.loc_disjoint loc_locals (DLL.fp_dll h ((DLL.g_node_val h n).qsm_state@h).segments) /\
+            DLL.dll_valid h ((DLL.g_node_val h n).qsm_state@h).segments))
+      in
       let pre h : GTot Type0 = inv h in
       let post (x:bool) h : GTot Type0 =
         inv h /\
@@ -113,13 +128,19 @@ let findReadyStream (cs:pointer connection): ST (quic_stream_or_null)
       let body (): Stack unit
           (requires (fun h0 -> post true h0))
           (ensures (fun _ _ h1 -> pre h1)) =
+        let hhh = HST.get () in
         let isready = hasMoreToSend (DLL.coerce_non_null !*pp) in
         if isready then (
           pstrm *= !*pp
           );
         pp *= DLL.next_node lst (DLL.coerce_non_null !*pp) ;
         let nn = DLL.is_null_node !*pp in
-        pstop *= (nn || isready)
+        pstop *= (nn || isready);
+        let hhh1 = HST.get () in
+        assert (DLL.as_list hhh lst == DLL.as_list hhh1 lst); (* OBSERVE *)
+        assert (forall n. {:pattern (n `L.memP` DLL.as_list hhh lst)}
+                  n `L.memP` DLL.as_list hhh lst ==>
+                DLL.fp_dll hhh lst `B.loc_includes` DLL.fp_node n) (* OBSERVE *)
       in
       let hhh = HST.get () in
       C.Loops.while #pre #post test body;
